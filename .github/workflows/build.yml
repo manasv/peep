@@ -18,11 +18,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: rustfmt, clippy
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install Linux libraries
@@ -48,7 +48,7 @@ jobs:
           ./script/ci_linux.sh full 2>&1 | tee .build/ci/linux.log
       - name: Upload Linux CI log
         if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Peep-Linux-CI-log
           path: .build/ci/linux.log
@@ -61,7 +61,7 @@ jobs:
           ./script/ci_windows.ps1 full *>&1 | Tee-Object -FilePath .build/ci/windows.log
       - name: Upload Windows CI log
         if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Peep-Windows-CI-log
           path: .build/ci/windows.log
@@ -72,7 +72,7 @@ jobs:
       - name: Package macOS app
         if: runner.os == 'macOS'
         run: ./script/package_release.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Peep-${{ runner.os }}-${{ runner.arch }}
           path: .build/release/*
