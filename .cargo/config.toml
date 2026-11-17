@@ -1,2 +1,5 @@
 [env]
 MACOSX_DEPLOYMENT_TARGET = "26.0"
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "relocation-model=dynamic-no-pic"]
