@@ -577,17 +577,6 @@ pub fn model_download_size() -> u64 {
     ONNX.download_bytes()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn shortcuts_and_labels_use_desktop_key_names() {
-        assert!(parse_shortcut("Control+Shift+Space").is_ok());
-        assert!(parse_shortcut("Shift+Space").is_err());
-        assert_eq!(shortcut_display_name("Control+Alt+Digit2"), "Control–Alt–2");
-    }
-}
-
 #[cfg(target_os = "linux")]
 pub fn handle_cli() -> anyhow::Result<bool> {
     let actions: Vec<_> = std::env::args()
@@ -605,4 +594,15 @@ pub fn handle_cli() -> anyhow::Result<bool> {
 #[cfg(target_os = "linux")]
 pub fn open_existing() {
     let _ = peep_input::control::send("--open");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn shortcuts_and_labels_use_desktop_key_names() {
+        assert!(parse_shortcut("Control+Shift+Space").is_ok());
+        assert!(parse_shortcut("Shift+Space").is_err());
+        assert_eq!(shortcut_display_name("Control+Alt+Digit2"), "Control–Alt–2");
+    }
 }

@@ -35,6 +35,8 @@ struct StateData {
     password: bool,
     enabled: bool,
     writes: u32,
+    text_role: bool,
+    single_line: bool,
 }
 type Shared = Arc<Mutex<StateData>>;
 struct Accessible {
@@ -77,6 +79,7 @@ impl Accessible {
             0 => Role::Application,
             1 => Role::Frame,
             _ if self.state.lock().unwrap().password => Role::PasswordText,
+            _ if self.state.lock().unwrap().text_role => Role::Text,
             _ => Role::Entry,
         }
     }
@@ -92,6 +95,9 @@ impl Accessible {
         }
         if self.kind == 2 && state.editable {
             result.insert(State::Editable);
+        }
+        if self.kind == 2 && state.single_line {
+            result.insert(State::SingleLine);
         }
         result
     }
@@ -207,6 +213,11 @@ impl Control {
     fn read(&self) -> (String, u32) {
         let state = self.0.lock().unwrap();
         (state.text.clone(), state.writes)
+    }
+    fn text_role(&self, single_line: bool) {
+        let mut state = self.0.lock().unwrap();
+        state.text_role = true;
+        state.single_line = single_line;
     }
 }
 
@@ -353,6 +364,23 @@ fn accessible_delivery_checks_focus_selection_text_privacy_and_cancellation() {
         .insert(target, "hello", &CancellationToken::new())
         .unwrap();
     assert_eq!(read(), ("ahellob".into(), 1));
+    for single_line in [true, false] {
+        reset(1, 2, true, true, true, false);
+        runtime
+            .block_on(control.call::<_, _, ()>("TextRole", &(single_line,)))
+            .unwrap();
+        let target = context.capture().unwrap();
+        let result = context.insert(target, "hello", &CancellationToken::new());
+        assert_eq!(result.is_ok(), single_line);
+        assert_eq!(
+            read(),
+            if single_line {
+                ("ahellob".into(), 1)
+            } else {
+                ("a😀b".into(), 0)
+            }
+        );
+    }
     reset(1, 1, true, true, true, false);
     let target = context.capture().unwrap();
     context

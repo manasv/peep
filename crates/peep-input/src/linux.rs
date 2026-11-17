@@ -13,7 +13,6 @@ pub struct Target {
     object: ObjectRefOwned,
     window: ObjectRefOwned,
     snapshot: Snapshot,
-    role: Role,
     pid: Option<u32>,
 }
 
@@ -87,7 +86,7 @@ impl Context {
                     editor
                         .insert_text(target.snapshot.start.try_into()?, text, text.len().try_into()?)
                         .await?
-                } else if target.role == Role::Entry {
+                } else if plain_entry(connection, &target.object).await? {
                     editor.set_text_contents(&expected).await?
                 } else {
                     bail!("This editor cannot safely replace selected text. Clear the selection and try again.");
@@ -183,7 +182,6 @@ async fn find_target(connection: &AccessibilityConnection) -> Result<Target> {
                 object,
                 window,
                 snapshot,
-                role,
                 pid: pid.ok(),
             });
         }
@@ -223,6 +221,15 @@ async fn text_proxy<'a>(
         .build()
         .await?)
 }
+
+async fn plain_entry(connection: &Connection, object: &ObjectRefOwned) -> Result<bool> {
+    let proxy = accessible(connection, object).await?;
+    let role = proxy.get_role().await?;
+    let states = proxy.get_state().await?;
+    Ok(!states.contains(State::MultiLine)
+        && (role == Role::Entry || role == Role::Text && states.contains(State::SingleLine)))
+}
+
 async fn snapshot(connection: &Connection, object: &ObjectRefOwned) -> Result<Snapshot> {
     let accessible = accessible(connection, object).await?;
     let role = accessible.get_role().await?;
