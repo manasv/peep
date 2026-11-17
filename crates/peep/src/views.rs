@@ -451,25 +451,15 @@ impl Render for Peep {
                                                             .font_weight(FontWeight::MEDIUM)
                                                             .child("Keyboard shortcut"),
                                                     )
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(rgb(p.accent))
-                                                            .text_ellipsis()
-                                                            .child(
-                                                                if self.shortcut_problem.is_empty()
-                                                                {
-                                                                    "Shortcut unavailable"
-                                                                        .to_owned()
-                                                                } else {
-                                                                    self.shortcut_problem.clone()
-                                                                },
-                                                            )
-                                                            .when(
-                                                                self.shortcut_problem.is_empty(),
-                                                                |d| d.opacity(0.),
-                                                            ),
-                                                    ),
+                                                    .when(!self.shortcut_problem.is_empty(), |d| {
+                                                        d.child(
+                                                            div()
+                                                                .text_xs()
+                                                                .text_color(rgb(p.accent))
+                                                                .text_ellipsis()
+                                                                .child(self.shortcut_problem.clone()),
+                                                        )
+                                                    }),
                                             )
                                             .child(
                                                 self.control(
