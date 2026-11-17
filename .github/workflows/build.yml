@@ -28,26 +28,18 @@ jobs:
       - name: Install Linux libraries
         if: runner.os == 'Linux'
         run: ./script/setup_linux.sh
-      - name: Configure Windows native tools
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
-          $fxc = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\fxc.exe' | Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $fxc) { throw 'Windows SDK shader compiler is missing' }
-          "GPUI_FXC_PATH=$($fxc.FullName)" >> $env:GITHUB_ENV
       - name: Install Metal toolchain
         if: runner.os == 'macOS'
         run: xcodebuild -downloadComponent MetalToolchain
       - uses: Swatinem/rust-cache@v2
       - name: Check formatting
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
         run: cargo fmt --all -- --check
       - name: Test
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
         run: cargo test --workspace --locked
       - name: Lint
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Run Linux CI
         if: runner.os == 'Linux'
@@ -61,23 +53,25 @@ jobs:
           name: Peep-Linux-CI-log
           path: .build/ci/linux.log
           if-no-files-found: ignore
-      - name: Test native Windows text delivery
+      - name: Run Windows CI
         if: runner.os == 'Windows'
-        env:
-          PEEP_TEST_WINDOWS_UI: '1'
-        run: cargo test -p peep-input --locked --test windows_editor -- --nocapture
-      - name: Test ONNX inference with public speech fixture
-        if: runner.os == 'Windows'
-        run: python script/test_inference.py --backend onnx
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .build/ci | Out-Null
+          ./script/ci_windows.ps1 full *>&1 | Tee-Object -FilePath .build/ci/windows.log
+      - name: Upload Windows CI log
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Peep-Windows-CI-log
+          path: .build/ci/windows.log
+          if-no-files-found: ignore
       - name: Test Core ML inference with public speech fixture
         if: runner.os == 'macOS'
         run: python script/test_inference.py --backend coreml
       - name: Package macOS app
         if: runner.os == 'macOS'
         run: ./script/package_release.sh
-      - name: Package desktop app
-        if: runner.os == 'Windows'
-        run: python script/package_desktop.py
       - uses: actions/upload-artifact@v4
         with:
           name: Peep-${{ runner.os }}-${{ runner.arch }}

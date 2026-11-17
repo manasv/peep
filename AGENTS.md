@@ -28,6 +28,7 @@ dbus-run-session -- cargo test -p peep-input --features linux-integration
 ./script/test_linux_desktop.sh x11
 ./script/test_linux_desktop.sh wayland
 ./script/ci_local.sh
+powershell -ExecutionPolicy Bypass -File script/ci_windows.ps1
 ./script/ci_logs.sh
 ```
 
