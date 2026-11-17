@@ -9,11 +9,11 @@ use peep_core::Event;
 use std::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-#[cfg(any(target_os = "linux", feature = "linux-integration"))]
+#[cfg(all(unix, any(target_os = "linux", feature = "linux-integration")))]
 pub mod control;
-#[cfg(any(target_os = "linux", feature = "linux-integration"))]
+#[cfg(all(unix, any(target_os = "linux", feature = "linux-integration")))]
 pub mod linux;
-#[cfg(any(target_os = "linux", feature = "linux-integration"))]
+#[cfg(all(unix, any(target_os = "linux", feature = "linux-integration")))]
 pub mod portal;
 #[cfg(target_os = "windows")]
 mod windows;

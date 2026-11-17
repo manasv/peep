@@ -4,6 +4,11 @@ GPUI 0.2.2 — Copyright Zed Industries, Inc.
 https://github.com/zed-industries/zed
 Apache License 2.0; see GPUI-LICENSE.txt.
 
+xattr 0.2.3 — Copyright Steven Allen
+https://github.com/Stebalien/xattr
+MIT License (selected from MIT OR Apache-2.0); see Xattr-LICENSE.txt.
+The vendored copy uses ENODATA for missing attributes on Linux and Android.
+
 Scriptrs 0.5.0 — Copyright Praveen Perera and contributors
 https://github.com/avencera/scriptrs
 Apache License 2.0; see Scriptrs-LICENSE.txt.

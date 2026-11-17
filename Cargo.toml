@@ -1,6 +1,11 @@
 [workspace]
 members = ["crates/peep-core", "crates/peep", "crates/peep-macos", "crates/peep-runtime", "crates/peep-desktop", "crates/peep-input"]
+exclude = ["vendor/xattr"]
 resolver = "2"
+
+[patch.crates-io]
+# GPUI's archive dependency needs Linux's ENODATA with current libc.
+xattr = { path = "vendor/xattr" }
 
 [workspace.package]
 version = "0.2.0"

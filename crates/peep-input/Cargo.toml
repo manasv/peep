@@ -11,6 +11,8 @@ serde_json.workspace = true
 async-channel = "2"
 tokio = { version = "1", features = ["rt", "time", "macros", "net", "sync"] }
 tokio-util = { version = "0.7", features = ["rt"] }
+
+[target.'cfg(unix)'.dependencies]
 ashpd = { version = "0.11.1", default-features = false, features = ["async-std"], optional = true }
 atspi = { version = "0.30", default-features = false, features = ["proxies"], optional = true }
 atspi-connection = { version = "0.14", default-features = false, optional = true }

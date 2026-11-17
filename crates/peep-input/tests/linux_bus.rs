@@ -1,4 +1,4 @@
-#![cfg(any(target_os = "linux", feature = "linux-integration"))]
+#![cfg(all(unix, any(target_os = "linux", feature = "linux-integration")))]
 
 use atspi::{ObjectRef, ObjectRefOwned, Role, State, StateSet};
 use peep_input::linux::Context;

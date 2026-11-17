@@ -1,4 +1,4 @@
-#![cfg(any(target_os = "linux", feature = "linux-integration"))]
+#![cfg(all(unix, any(target_os = "linux", feature = "linux-integration")))]
 
 use peep_input::portal::{self, Command};
 use std::{
