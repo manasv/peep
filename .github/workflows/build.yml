@@ -32,6 +32,11 @@ jobs:
         if: runner.os == 'macOS'
         run: xcodebuild -downloadComponent MetalToolchain
       - uses: Swatinem/rust-cache@v2
+      - name: Rebuild Linux inference libraries
+        if: runner.os == 'Linux'
+        run: |
+          cargo clean --package sherpa-rs-sys
+          cargo clean --package sherpa-rs-sys --release
       - name: Check formatting
         if: runner.os == 'macOS'
         run: cargo fmt --all -- --check
@@ -43,6 +48,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Run Linux CI
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           mkdir -p .build/ci
           ./script/ci_linux.sh full 2>&1 | tee .build/ci/linux.log
