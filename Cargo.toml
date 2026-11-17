@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/peep-core", "crates/peep-macos"]
+members = ["crates/peep-core", "crates/peep", "crates/peep-macos"]
 resolver = "2"
 
 [workspace.package]

@@ -1,0 +1,11 @@
+[package]
+name = "peep"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+peep-core = { path = "../peep-core" }
+peep-macos = { path = "../peep-macos" }
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }
+async-channel = "2"
+env_logger = "0.11"
