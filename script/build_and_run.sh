@@ -20,6 +20,7 @@ bundle="$stage/Peep.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp "$root/target/$configuration/peep" "$bundle/Contents/MacOS/Peep"
 cp -f assets/notices/*.txt "$bundle/Contents/Resources/"
+cp "$root/LICENSE" "$bundle/Contents/Resources/Peep-LICENSE.txt"
 python3 - "$bundle/Contents/Info.plist" <<'PY'
 import plistlib, sys
 with open(sys.argv[1], 'wb') as f:

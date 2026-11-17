@@ -2,6 +2,7 @@
 name = "peep-macos"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 peep-core = { path = "../peep-core" }
