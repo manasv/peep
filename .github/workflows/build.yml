@@ -52,6 +52,7 @@ jobs:
         with:
           name: Peep-Linux-CI-log
           path: .build/ci/linux.log
+          include-hidden-files: true
           if-no-files-found: ignore
       - name: Run Windows CI
         if: runner.os == 'Windows'
@@ -65,6 +66,7 @@ jobs:
         with:
           name: Peep-Windows-CI-log
           path: .build/ci/windows.log
+          include-hidden-files: true
           if-no-files-found: ignore
       - name: Test Core ML inference with public speech fixture
         if: runner.os == 'macOS'
@@ -75,4 +77,8 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: Peep-${{ runner.os }}-${{ runner.arch }}
-          path: .build/release/*
+          path: |
+            .build/release/Peep-*.zip
+            .build/release/Peep-*.tar.gz
+          include-hidden-files: true
+          if-no-files-found: error
