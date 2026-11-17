@@ -9,7 +9,7 @@ use std::{
 use tokio_util::sync::CancellationToken;
 use windows::{
     Win32::{
-        Foundation::{HWND, LPARAM, WPARAM},
+        Foundation::{ERROR_SUCCESS, GetLastError, HWND, LPARAM, SetLastError, WPARAM},
         UI::{Controls::*, Input::KeyboardAndMouse::SetFocus, WindowsAndMessaging::*},
     },
     core::{HSTRING, w},
@@ -95,8 +95,10 @@ impl Drop for Fixture {
         let _ = self.0.wait();
     }
 }
+#[track_caller]
 fn message(window: HWND, code: u32, wparam: WPARAM, lparam: LPARAM) -> usize {
     let mut result = 0;
+    unsafe { SetLastError(ERROR_SUCCESS) };
     assert_ne!(
         unsafe {
             SendMessageTimeoutW(
@@ -104,13 +106,16 @@ fn message(window: HWND, code: u32, wparam: WPARAM, lparam: LPARAM) -> usize {
                 code,
                 wparam,
                 lparam,
-                SMTO_ABORTIFHUNG,
-                500,
+                SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT,
+                2_000,
                 Some(&mut result),
             )
         }
         .0,
-        0
+        0,
+        "Fixture message 0x{code:04X} to {window:?} failed: {:?}; window exists: {}",
+        unsafe { GetLastError() },
+        unsafe { IsWindow(Some(window)).as_bool() },
     );
     result
 }
@@ -153,11 +158,16 @@ fn native_windows_delivery_preserves_text_and_rejects_changed_or_protected_field
                     .map(|s| s.parse().unwrap())
                     .collect();
                 let _ = tx.send(handles);
-                break;
+            } else {
+                eprintln!("Windows fixture: {line}");
             }
         }
     });
     let handles = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(
+        fixture.0.try_wait().unwrap().is_none(),
+        "Fixture exited before setup"
+    );
     let (frame, edit, other) = (
         HWND(handles[0] as *mut _),
         HWND(handles[1] as *mut _),
@@ -188,6 +198,7 @@ fn native_windows_delivery_preserves_text_and_rejects_changed_or_protected_field
         focus();
     };
     let mut context = NativeContext::new().unwrap();
+    message(frame, WM_NULL, WPARAM(0), LPARAM(0));
     reset();
     let target = context.capture().unwrap();
     assert!(target.belongs_to_process(fixture.0.id()));
