@@ -31,6 +31,7 @@ windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_System_Co
 
 [target.'cfg(target_os = "windows")'.dependencies.tray-icon]
 version = "0.26"
+default-features = false
 optional = true
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies.image]
