@@ -14,6 +14,15 @@ runtime="$(mktemp -d)"
 chmod 700 "$runtime"
 processes=()
 cleanup() {
+  local status=$?
+  if [[ "$status" != 0 ]]; then
+    for log in "$runtime/compositor.log" "$runtime/input.log"; do
+      if [[ -s "$log" ]]; then
+        printf '\n%s diagnostics:\n' "${log##*/}" >&2
+        cat "$log" >&2
+      fi
+    done
+  fi
   for process in "${processes[@]}"; do kill "$process" 2>/dev/null || true; done
   for process in "${processes[@]}"; do wait "$process" 2>/dev/null || true; done
   rm -rf -- "$runtime"

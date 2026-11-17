@@ -113,6 +113,22 @@ cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
+Run the Linux checks locally with `./script/ci_local.sh`. On macOS, install
+[Lima](https://lima-vm.io) first (`brew install lima`); the script creates an
+Ubuntu 24.04 VM, installs Rust 1.96, and preserves build caches between runs.
+It runs the same checks as GitHub Actions, including X11/Wayland editor tests,
+inference, and release packaging. `./script/ci_local.sh check` skips release
+packaging. Logs are saved under `.build/ci/`.
+On Linux, install the test dependencies with `./script/setup_linux.sh` first.
+
+The local VM uses the host's CPU architecture. On Apple silicon this tests
+Linux ARM64; GitHub Actions also checks Linux x64. Windows editor tests require
+an interactive Windows desktop.
+
+With an authenticated [GitHub CLI](https://cli.github.com),
+`./script/ci_logs.sh` prints the latest run and failed job logs for your branch.
+Pass a run ID to inspect a specific run.
+
 On macOS, `./script/build_and_run.sh` builds and launches a development bundle;
 `--logs` runs it in the foreground and `--debug` launches LLDB. Test permissions
 with the copy in `/Applications`; ad hoc rebuilds may require granting access again.

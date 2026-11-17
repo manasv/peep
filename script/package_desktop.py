@@ -19,6 +19,10 @@ def main():
     if system not in ('windows', 'linux'):
         parser.error('Run this on Windows or Linux. On macOS use package_release.sh.')
     subprocess.run(['cargo', 'build', '--release', '--locked', '-p', 'peep'], cwd=ROOT, check=True)
+    target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
+    if not target.is_absolute():
+        target = ROOT / target
+    release = target / 'release'
     version = tomllib.loads((ROOT / 'Cargo.toml').read_text())['workspace']['package']['version']
     name = f'Peep-{version}-{system}-{platform.machine().lower()}'
     output = args.output_dir.resolve()
@@ -30,11 +34,11 @@ def main():
         bundle = staging / name
         bundle.mkdir()
         executable = 'peep.exe' if system == 'windows' else 'peep'
-        shutil.copy2(ROOT / 'target/release' / executable, bundle / executable)
+        shutil.copy2(release / executable, bundle / executable)
         shutil.copy2(ROOT / 'LICENSE', bundle / 'LICENSE')
         if system == 'linux':
             for library in ('libsherpa-onnx-c-api.so', 'libonnxruntime.so'):
-                shutil.copy2(ROOT / 'target/release' / library, bundle / library)
+                shutil.copy2(release / library, bundle / library)
             environment = {key: value for key, value in os.environ.items() if key != 'LD_LIBRARY_PATH'}
             check = subprocess.run(['ldd', '-r', str(bundle / executable)],
                                    env=environment, capture_output=True, text=True)
@@ -46,7 +50,7 @@ def main():
         shutil.copytree(ROOT / 'assets/notices', bundle / 'notices')
         package = shutil.make_archive(str(staging / 'release'), 'zip' if system == 'windows' else 'gztar',
                                       root_dir=staging, base_dir=name)
-        os.link(package, archive)
+        os.replace(package, archive)
     print(archive)
 
 

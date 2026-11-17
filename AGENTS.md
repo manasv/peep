@@ -27,6 +27,8 @@ python3 script/test_inference.py --backend onnx
 dbus-run-session -- cargo test -p peep-input --features linux-integration
 ./script/test_linux_desktop.sh x11
 ./script/test_linux_desktop.sh wayland
+./script/ci_local.sh
+./script/ci_logs.sh
 ```
 
 `PEEP_CONFIGURATION=release` selects release builds. Real-audio tests need

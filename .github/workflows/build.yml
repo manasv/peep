@@ -27,9 +27,7 @@ jobs:
           python-version: '3.12'
       - name: Install Linux libraries
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libudev-dev libx11-xcb-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libvulkan-dev dbus-x11 at-spi2-core libatk-adaptor python3-gi gir1.2-gtk-3.0 xvfb openbox sway wtype
+        run: ./script/setup_linux.sh
       - name: Configure Windows native tools
         if: runner.os == 'Windows'
         shell: pwsh
@@ -43,27 +41,33 @@ jobs:
         run: xcodebuild -downloadComponent MetalToolchain
       - uses: Swatinem/rust-cache@v2
       - name: Check formatting
+        if: runner.os != 'Linux'
         run: cargo fmt --all -- --check
       - name: Test
+        if: runner.os != 'Linux'
         run: cargo test --workspace --locked
       - name: Lint
+        if: runner.os != 'Linux'
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-      - name: Test Wayland portal and accessibility protocols
+      - name: Run Linux CI
         if: runner.os == 'Linux'
-        run: dbus-run-session -- env PEEP_REQUIRE_DBUS_TESTS=1 cargo test -p peep-input --features linux-integration --locked --test linux_bus --test portal_bus
-      - name: Test native X11 text delivery
-        if: runner.os == 'Linux'
-        run: ./script/test_linux_desktop.sh x11
-      - name: Test native Wayland text delivery
-        if: runner.os == 'Linux'
-        run: ./script/test_linux_desktop.sh wayland
+        run: |
+          mkdir -p .build/ci
+          ./script/ci_linux.sh full 2>&1 | tee .build/ci/linux.log
+      - name: Upload Linux CI log
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Peep-Linux-CI-log
+          path: .build/ci/linux.log
+          if-no-files-found: ignore
       - name: Test native Windows text delivery
         if: runner.os == 'Windows'
         env:
           PEEP_TEST_WINDOWS_UI: '1'
         run: cargo test -p peep-input --locked --test windows_editor -- --nocapture
       - name: Test ONNX inference with public speech fixture
-        if: runner.os != 'macOS'
+        if: runner.os == 'Windows'
         run: python script/test_inference.py --backend onnx
       - name: Test Core ML inference with public speech fixture
         if: runner.os == 'macOS'
@@ -72,7 +76,7 @@ jobs:
         if: runner.os == 'macOS'
         run: ./script/package_release.sh
       - name: Package desktop app
-        if: runner.os != 'macOS'
+        if: runner.os == 'Windows'
         run: python script/package_desktop.py
       - uses: actions/upload-artifact@v4
         with:
