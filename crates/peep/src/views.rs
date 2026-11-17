@@ -238,7 +238,10 @@ impl Peep {
                         )
                         .child(div().flex().gap_2().child(self.control(
                             7,
-                            "Download · 632 MB",
+                            format!(
+                                "Download · {:.0} MB",
+                                platform::model_download_size() as f64 / 1_000_000.
+                            ),
                             UiAction::Download,
                             true,
                             p,
@@ -291,7 +294,7 @@ impl Render for Peep {
             .track_focus(&self.focus)
             .key_context("Peep")
             .size_full()
-            .font_family(".SystemUIFont")
+            .font_family(platform::FONT)
             .text_sm()
             .text_color(rgb(p.text))
             .bg(rgb(p.base))
@@ -314,10 +317,11 @@ impl Render for Peep {
                             return;
                         }
                         let current = window.viewport_size();
-                        let height = content
-                            .size
-                            .height
-                            .min(px(peep_macos::available_content_height()));
+                        #[cfg(all(target_os = "macos", not(feature = "desktop-preview")))]
+                        let available = px(platform::available_content_height());
+                        #[cfg(any(not(target_os = "macos"), feature = "desktop-preview"))]
+                        let available = window.display(cx).map_or(px(800.), |display| display.bounds().size.height - px(100.));
+                        let height = content.size.height.min(available);
                         if (height - current.height).abs() > px(1.) {
                             window.defer(cx, move |window, _| {
                                 window.resize(size(current.width, height))
@@ -358,6 +362,9 @@ impl Render for Peep {
                                             ),
                                     ),
                             )
+                            .when(!self.session.message.is_empty(), |d| {
+                                d.child(div().text_xs().text_color(rgb(p.muted)).child(self.session.message.clone()))
+                            })
                             .when(busy, |d| {
                                 d.child(
                                     div()
@@ -404,6 +411,22 @@ impl Render for Peep {
                                 matches!(phase, Phase::NeedsModel | Phase::Downloading),
                                 |d| d.child(self.setup(p, cx)),
                             )
+                            .when(!platform::NATIVE_INSERTION, |d| {
+                                #[cfg(any(not(target_os = "macos"), feature = "desktop-preview"))]
+                                let d = d.child(
+                                    self.card(p).py_4().gap_3()
+                                        .child(div().text_xs().text_color(rgb(p.muted)).child("Record, then copy and paste your text into another app."))
+                                        .when(phase == Phase::Ready && self.session.transcript.is_empty(), |d| {
+                                            d.child(self.control(8, "Record", UiAction::Record, !self.recording_shortcut, p, cx))
+                                        })
+                                        .when(!self.session.transcript.is_empty(), |d| {
+                                            d.child(div().text_sm().child(self.session.transcript.clone()))
+                                                .child(self.control(11, "Copy text", UiAction::Copy, !busy, p, cx))
+                                                .child(self.control(12, "Discard", UiAction::Discard, !busy, p, cx))
+                                        })
+                                );
+                                d
+                            })
                             .child(
                                 self.card(p)
                                     .child(
@@ -467,7 +490,7 @@ impl Render for Peep {
                                     )
                                     .child(div().h_px().bg(rgb(p.line)))
                                     .child(self.setting_row(
-                                        "Dictation",
+                                        if platform::NATIVE_INSERTION { "Dictation" } else { "Global shortcut" },
                                         "",
                                         self.toggle(
                                             1,
@@ -480,7 +503,7 @@ impl Render for Peep {
                                         p,
                                     ))
                                     .child(div().h_px().bg(rgb(p.line)))
-                                    .child(self.setting_row(
+                                    .when(platform::NATIVE_INSERTION, |d| d.child(self.setting_row(
                                         "Floating indicator",
                                         "",
                                         self.toggle(
@@ -496,9 +519,9 @@ impl Render for Peep {
                                     .child(div().h_px().bg(rgb(p.line)))
                                     .child(self.access_row(true, 4, p, cx))
                                     .child(div().h_px().bg(rgb(p.line)))
-                                    .child(self.access_row(false, 5, p, cx)),
+                                    .child(self.access_row(false, 5, p, cx))),
                             )
-                            .child(
+                            .when(platform::NATIVE_INSERTION, |d| d.child(
                                 div().flex().justify_end().child(
                                     self.control(
                                         6,
@@ -512,7 +535,7 @@ impl Render for Peep {
                                     .bg(rgb(p.base))
                                     .text_color(rgb(p.muted)),
                                 ),
-                            ),
+                            )),
                     ),
             )
     }

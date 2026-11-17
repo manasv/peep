@@ -6,7 +6,24 @@ license.workspace = true
 
 [dependencies]
 peep-core = { path = "../peep-core" }
-peep-macos = { path = "../peep-macos" }
-gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }
 async-channel = "2"
 env_logger = "0.11"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+peep-macos = { path = "../peep-macos" }
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+peep-desktop = { path = "../peep-desktop" }
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "windows-manifest"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+peep-desktop = { path = "../peep-desktop" }
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11", "wayland"] }
+
+[features]
+desktop-preview = ["dep:peep-desktop"]
+
+[dependencies.peep-desktop]
+path = "../peep-desktop"
+optional = true

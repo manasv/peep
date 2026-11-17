@@ -1,12 +1,16 @@
 # Peep
 
-Offline dictation for Apple silicon Macs. Rust, GPUI, and Core ML. Audio and
-transcripts stay in memory. Requires macOS 26+, Rust 1.96+, and Xcode with Metal.
+Offline dictation in Rust and GPUI. Audio and transcripts stay in memory.
+macOS uses Core ML and requires macOS 26+, Apple silicon, and Xcode with Metal.
+Windows and Linux use Parakeet ONNX on the CPU and copy-and-paste delivery.
+Rust 1.96+ is required on all platforms.
 
 - `crates/peep`: window and application lifecycle.
 - `crates/peep-core`: dictation state and commands.
-- `crates/peep-macos`: capture, inference, permissions, and text insertion.
-- `crates/peep-macos/assets/parakeet-v3.json`: pinned model manifest.
+- `crates/peep-runtime`: shared audio, model downloads, settings, and instance locking.
+- `crates/peep-macos`: Core ML inference, permissions, and native text insertion.
+- `crates/peep-desktop`: Windows/Linux services and ONNX inference.
+- `crates/peep-runtime/assets`: pinned Core ML and ONNX model manifests.
 
 ## Commands
 
@@ -16,10 +20,15 @@ transcripts stay in memory. Requires macOS 26+, Rust 1.96+, and Xcode with Metal
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ./script/package_release.sh --help
+python3 script/package_desktop.py --help
+python3 script/test_inference.py --backend onnx
 ```
 
 `PEEP_CONFIGURATION=release` selects release builds. Real-audio tests need
-`PEEP_TEST_MODEL_PATH` and `PEEP_TEST_AUDIO_PATH`. Test macOS permissions with
+`PEEP_TEST_MODEL_PATH` (Core ML) or `PEEP_TEST_ONNX_MODEL_PATH` (ONNX), plus
+`PEEP_TEST_AUDIO_PATH`. `PEEP_DATA_DIR` isolates test app data.
+`cargo run -p peep --features desktop-preview -- --models PATH` exercises the
+Windows/Linux UI and ONNX backend on a Mac. Test macOS permissions with
 `/Applications/Peep.app`; ad hoc rebuilds can require granting access again.
 
 ## Working rules

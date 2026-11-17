@@ -1,0 +1,23 @@
+[package]
+name = "peep-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+peep-core = { path = "../peep-core" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow = "1"
+async-channel = "2"
+cpal = "0.18"
+rubato = "0.16"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+sha2 = "0.10"
+tempfile = "3"
+directories = "6"
+tokio = { version = "1", features = ["rt", "time", "macros"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+sha2 = { version = "0.10", features = ["asm"] }

@@ -7,18 +7,22 @@
 Offline dictation. Press a shortcut, speak, and press it again to put your words
 into the app you're using.
 
-Peep lives in the menu bar and transcribes on your Mac using Parakeet and
-Core ML. Audio and transcripts stay in memory; there's no recording archive
-or transcript history. After the initial model download, dictation works offline.
+Peep transcribes locally using Parakeet. Audio and transcripts stay in memory;
+there's no recording archive or transcript history. After the initial model
+download, dictation works offline.
+
+On macOS, Peep lives in the menu bar and inserts text into the focused app.
+The experimental Windows and Linux ports show the transcript for you to copy
+and paste. macOS keeps its Core ML backend; Windows and Linux use ONNX on the CPU.
 
 ## Getting started
 
-Peep currently supports **macOS 26 or later** on **Apple silicon**. Windows and
-Linux aren't supported yet.
+You'll need **Rust 1.96+** and **Python 3.11+** to build from source.
 
-To build from source, you'll need **Rust 1.96+**, **Python 3**, and
-**Xcode with the Metal toolchain**.
-Make sure the full Xcode installation is selected as your active developer directory.
+### macOS
+
+Requires **macOS 26+**, **Apple silicon**, and **Xcode with the Metal toolchain**.
+Select the full Xcode installation as your active developer directory.
 
 ```sh
 git clone https://github.com/manasv/peep.git
@@ -33,7 +37,31 @@ On first launch, download the speech model (about 632 MB) and enable Microphone
 and Text insertion access. If macOS asks you to open System Settings, allow Peep
 under **Privacy & Security → Microphone** and **Accessibility**.
 
-## Usage
+### Windows and Linux
+
+The ports target Windows x64 and Linux x64 and are still experimental.
+Windows builds need the MSVC C++ tools, Windows SDK, CMake, and LLVM/libclang.
+Use a Visual Studio developer terminal. If needed, set `LIBCLANG_PATH` to LLVM's
+`bin` directory and `GPUI_FXC_PATH` to the SDK's `fxc.exe`.
+On Ubuntu, install the native libraries first:
+
+```sh
+sudo apt-get install clang cmake pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libudev-dev libx11-xcb-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libvulkan-dev
+```
+
+From a checkout of this repository:
+
+```sh
+cargo run --release --locked -p peep
+```
+
+Download the model when prompted (about 671 MB). Press **Record**, then
+**Finish**, and use **Copy text** to paste the result into your app.
+Control–Shift–Space also works on Windows and Linux X11. On Wayland, use the
+window controls; global shortcuts aren't implemented yet. Closing the window
+quits Peep on Windows and Linux.
+
+## Usage on macOS
 
 1. Click a text field in another app.
 2. Press **Control–Shift–Space** and start speaking.
@@ -50,29 +78,32 @@ and terminals aren't supported.
 ## Development
 
 Peep is built with Rust, [GPUI](https://github.com/zed-industries/zed), and
-[Scriptrs](https://github.com/avencera/scriptrs). The workspace has three crates:
-`peep` for the UI, `peep-core` for the dictation state, and `peep-macos` for
-capture, inference, and macOS integration.
+[Scriptrs](https://github.com/avencera/scriptrs) on macOS, with
+[Sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) on Windows and Linux.
+`peep-core` holds the dictation state; `peep-runtime` shares audio, downloads,
+and settings. `peep-macos` and `peep-desktop` provide the platform backends.
 
 ```sh
-./script/build_and_run.sh
 cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-The build script also accepts `--logs` and `--debug`. For packaging options,
-run `./script/package_release.sh --help`.
+On macOS, `./script/build_and_run.sh` builds and launches a development bundle;
+`--logs` runs it in the foreground and `--debug` launches LLDB. Test permissions
+with the copy in `/Applications`; ad hoc rebuilds may require granting access again.
 
-The real-audio test needs `PEEP_TEST_MODEL_PATH` (a directory containing
-`parakeet-v3/`) and `PEEP_TEST_AUDIO_PATH` (a mono, 16-bit PCM WAV file).
-Without both, it returns without running inference.
+Run `python3 script/test_inference.py --backend coreml` on a Mac or
+`python3 script/test_inference.py --backend onnx` for the portable backend.
+These download verified model files and a public speech fixture. Ordinary
+workspace tests skip inference unless fixture environment variables are set.
 
-Use the copy in `/Applications` when testing permissions. Rebuilding an ad hoc
-signed app may require granting access again.
+For release archives, use `./script/package_release.sh` on macOS or
+`python3 script/package_desktop.py` on Windows/Linux. CI builds all three platforms.
+`PEEP_DATA_DIR` selects a separate data directory for testing.
 
 Bug reports and pull requests are welcome. For insertion issues, include the
-app you were dictating into along with your macOS version and steps to reproduce.
+app you were dictating into along with your operating system and steps to reproduce.
 
 ## License
 

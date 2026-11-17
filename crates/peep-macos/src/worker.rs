@@ -81,7 +81,7 @@ pub fn spawn(
                     }
                     Job::Transcribe(id, samples, rate, control) => {
                         let result = (|| -> Result<Event> {
-                            let audio = crate::audio::resample(&samples, rate)?;
+                            let audio = peep_runtime::audio::resample(&samples, rate)?;
                             if audio.len() < 4800 {
                                 bail!(
                                     "That recording was too short. Speak for at least 0.3 seconds."

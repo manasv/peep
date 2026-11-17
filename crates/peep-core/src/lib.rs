@@ -200,6 +200,11 @@ impl Session {
                 self.finish();
                 return vec![Command::Discard { id: self.id }];
             }
+            ("copy_ready", Phase::Delivering) => {
+                self.message = "Your text is ready to copy.".into();
+                self.finish();
+                return vec![Command::Discard { id: self.id }];
+            }
             ("delivered", Phase::Delivering) => {
                 self.message.clear();
                 self.transcript.clear();
@@ -317,6 +322,40 @@ mod tests {
         assert_eq!(s.phase, Phase::Ready);
         assert!(s.message.contains("ready to copy"));
     }
+    #[test]
+    fn desktop_copy_result_preserves_text_until_explicitly_copied() {
+        let mut s = ready();
+        s.start();
+        s.event(&event("recording", 1, ""));
+        s.stop();
+        s.event(&event("transcript", 1, "hello"));
+        assert_eq!(
+            s.event(&event("copy_ready", 1, "")),
+            vec![Command::Discard { id: 1 }]
+        );
+        assert_eq!(s.phase, Phase::Ready);
+        assert_eq!(s.transcript, "hello");
+        assert!(matches!(
+            s.presentation(),
+            Command::Presentation { can_copy: true, .. }
+        ));
+        assert!(s.event(&event("copy_ready", 1, "")).is_empty());
+        assert_eq!(s.transcript, "hello");
+    }
+
+    #[test]
+    fn canceled_or_stale_copy_result_cannot_replace_a_new_session() {
+        let mut s = ready();
+        s.start();
+        s.cancel();
+        assert!(s.event(&event("copy_ready", 1, "")).is_empty());
+        s.event(&event("canceled", 1, ""));
+        s.start();
+        assert!(s.event(&event("copy_ready", 1, "")).is_empty());
+        assert_eq!(s.phase, Phase::RequestingMicrophone);
+        assert!(s.transcript.is_empty());
+    }
+
     #[test]
     fn silence_never_inserts() {
         let mut s = ready();

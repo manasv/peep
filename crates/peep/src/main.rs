@@ -1,6 +1,9 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use gpui::{prelude::*, *};
 use peep_core::{Command, Event, Phase, Session};
-use peep_macos::send;
+mod platform;
+use platform::send;
 
 actions!(
     peep,
@@ -25,6 +28,12 @@ enum UiAction {
     Microphone,
     RecordShortcut,
     Refresh,
+    #[cfg(any(not(target_os = "macos"), feature = "desktop-preview"))]
+    Record,
+    #[cfg(any(not(target_os = "macos"), feature = "desktop-preview"))]
+    Copy,
+    #[cfg(any(not(target_os = "macos"), feature = "desktop-preview"))]
+    Discard,
 }
 
 struct Peep {
@@ -72,8 +81,13 @@ impl Peep {
                     this.recording_shortcut = false;
                     send(Command::CancelShortcut);
                 }
+                if !platform::NATIVE_INSERTION {
+                    this.quit();
+                }
             });
-            cx.hide();
+            if platform::NATIVE_INSERTION {
+                cx.hide();
+            }
             false
         });
         cx.observe_window_activation(window, |this, window, cx| {
@@ -174,7 +188,7 @@ impl Peep {
     }
 
     fn event(&mut self, event: Event, cx: &mut Context<Self>) {
-        if peep_macos::handle_event(&event) {
+        if platform::handle_event(&event) {
             return;
         }
         match event.kind.as_str() {
@@ -184,7 +198,7 @@ impl Peep {
                     && !self.recording_shortcut
                     && !event.text.is_empty()
                 {
-                    self.shortcut_problem = "Shortcut unavailable".into();
+                    self.shortcut_problem = event.text.clone();
                 }
                 self.preferences = event;
                 cx.notify();
@@ -200,8 +214,28 @@ impl Peep {
             "critical_problem" => {
                 self.critical_alert("Peep needs your attention", &event.text, false, cx);
             }
+            "copy_requested" if event.text == self.session.transcript && !self.session.busy() => {
+                cx.write_to_clipboard(ClipboardItem::new_string(event.text.clone()));
+                if cx
+                    .read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .as_deref()
+                    == Some(&event.text)
+                {
+                    self.session.transcript.clear();
+                    self.session.message = "Copied. Paste into your app with Ctrl–V.".into();
+                } else {
+                    self.session.message = "Could not copy your text. Try Copy text again.".into();
+                }
+                self.effects(vec![], cx);
+            }
             "text_copied" => {
                 self.session.transcript.clear();
+                self.session.message = if platform::NATIVE_INSERTION {
+                    String::new()
+                } else {
+                    "Copied. Paste into your app with Ctrl–V.".into()
+                };
                 self.effects(vec![], cx);
             }
             "toggle_dictation" if !self.quitting => {
@@ -253,6 +287,9 @@ impl Peep {
                     };
                     self.critical_alert(title, detail, before == Phase::Delivering, cx);
                 }
+                if event.kind == "copy_ready" {
+                    self.show(cx);
+                }
                 self.effects(effects, cx);
             }
             _ => {}
@@ -283,6 +320,23 @@ impl Peep {
                 vec![Command::RecordShortcut]
             }
             UiAction::Refresh => vec![Command::RefreshPermissions],
+            #[cfg(any(not(target_os = "macos"), feature = "desktop-preview"))]
+            UiAction::Record => {
+                if !self.session.transcript.is_empty() {
+                    return;
+                }
+                self.session.toggle()
+            }
+            #[cfg(any(not(target_os = "macos"), feature = "desktop-preview"))]
+            UiAction::Copy => vec![Command::Copy {
+                text: self.session.transcript.clone(),
+            }],
+            #[cfg(any(not(target_os = "macos"), feature = "desktop-preview"))]
+            UiAction::Discard => {
+                self.session.transcript.clear();
+                self.session.message.clear();
+                vec![]
+            }
         };
         self.effects(effects, cx);
     }
@@ -292,7 +346,7 @@ mod views;
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-    let instance = peep_macos::lock_instance().expect("single-instance lock");
+    let instance = platform::lock_instance().expect("single-instance lock");
     if instance.is_none() {
         return;
     }
@@ -305,7 +359,7 @@ fn main() {
         }
     });
     root.run(move |cx: &mut App| {
-        let cleanup = peep_macos::initialize(tx).expect("initialize macOS services");
+        let cleanup = platform::initialize(tx).expect("initialize platform services");
         cx.on_app_quit(move |_| {
             let cleanup = cleanup.clone();
             send(Command::Shutdown);
@@ -315,8 +369,8 @@ fn main() {
         })
         .detach();
         cx.bind_keys([
-            KeyBinding::new("cmd-q", Quit, None),
-            KeyBinding::new("cmd-,", ShowSettings, None),
+            KeyBinding::new(platform::QUIT_KEY, Quit, None),
+            KeyBinding::new(platform::SETTINGS_KEY, ShowSettings, None),
             KeyBinding::new("escape", CancelRecording, None),
             KeyBinding::new("tab", NextFocus, None),
             KeyBinding::new("shift-tab", PreviousFocus, None),
