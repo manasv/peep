@@ -9,11 +9,29 @@ use std::{
 use tokio_util::sync::CancellationToken;
 use windows::{
     Win32::{
-        Foundation::{ERROR_SUCCESS, GetLastError, HWND, LPARAM, SetLastError, WPARAM},
+        Foundation::{ERROR_SUCCESS, GetLastError, HWND, LPARAM, LRESULT, SetLastError, WPARAM},
+        System::LibraryLoader::GetModuleHandleW,
         UI::{Controls::*, Input::KeyboardAndMouse::SetFocus, WindowsAndMessaging::*},
     },
     core::{HSTRING, w},
 };
+
+const SET_PASSWORD_CHAR: u32 = WM_APP + 3;
+
+unsafe extern "system" fn fixture_window_proc(
+    window: HWND,
+    code: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    unsafe {
+        if code == SET_PASSWORD_CHAR {
+            let edit = HWND(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut _);
+            return SendMessageW(edit, EM_SETPASSWORDCHAR, Some(wparam), Some(lparam));
+        }
+        DefWindowProcW(window, code, wparam, lparam)
+    }
+}
 
 #[test]
 fn fixture_server() {
@@ -21,9 +39,20 @@ fn fixture_server() {
         return;
     }
     unsafe {
+        let instance = GetModuleHandleW(None).unwrap();
+        let class = w!("PeepEditorFixture");
+        assert_ne!(
+            RegisterClassW(&WNDCLASSW {
+                lpfnWndProc: Some(fixture_window_proc),
+                hInstance: instance.into(),
+                lpszClassName: class,
+                ..Default::default()
+            }),
+            0,
+        );
         let frame = CreateWindowExW(
             WINDOW_EX_STYLE(0),
-            w!("STATIC"),
+            class,
             w!("Peep integration fixture"),
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             60,
@@ -32,7 +61,7 @@ fn fixture_server() {
             300,
             None,
             None,
-            None,
+            Some(instance.into()),
             None,
         )
         .unwrap();
@@ -66,6 +95,7 @@ fn fixture_server() {
             None,
         )
         .unwrap();
+        SetWindowLongPtrW(frame, GWLP_USERDATA, edit.0 as isize);
         let _ = SetForegroundWindow(frame);
         let _ = SetFocus(Some(edit));
         SendMessageW(edit, EM_SETSEL, Some(WPARAM(1)), Some(LPARAM(3)));
@@ -191,7 +221,7 @@ fn native_windows_delivery_preserves_text_and_rejects_changed_or_protected_field
     };
     let reset = || {
         message(edit, EM_SETREADONLY, WPARAM(0), LPARAM(0));
-        message(edit, EM_SETPASSWORDCHAR, WPARAM(0), LPARAM(0));
+        message(frame, SET_PASSWORD_CHAR, WPARAM(0), LPARAM(0));
         let value = HSTRING::from("a😀b");
         message(edit, WM_SETTEXT, WPARAM(0), LPARAM(value.as_ptr() as isize));
         message(edit, EM_SETSEL, WPARAM(1), LPARAM(3));
@@ -250,7 +280,7 @@ fn native_windows_delivery_preserves_text_and_rejects_changed_or_protected_field
     message(edit, EM_SETREADONLY, WPARAM(1), LPARAM(0));
     assert!(context.capture().is_err());
     reset();
-    message(edit, EM_SETPASSWORDCHAR, WPARAM(42), LPARAM(0));
+    message(frame, SET_PASSWORD_CHAR, WPARAM(42), LPARAM(0));
     assert!(context.capture().is_err());
     reset();
     let target = context.capture().unwrap();
