@@ -1,0 +1,51 @@
+[package]
+name = "peep-input"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+peep-core = { path = "../peep-core" }
+anyhow = "1"
+serde_json.workspace = true
+async-channel = "2"
+tokio = { version = "1", features = ["rt", "time", "macros", "net", "sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+ashpd = { version = "0.11.1", default-features = false, features = ["tokio"], optional = true }
+atspi = { version = "0.30", default-features = false, features = ["proxies", "tokio"], optional = true }
+atspi-connection = { version = "0.14", default-features = false, optional = true }
+futures-util = { version = "0.3", optional = true }
+zbus = { version = "5", default-features = false, features = ["tokio"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.11.1", default-features = false, features = ["tokio"] }
+atspi = { version = "0.30", default-features = false, features = ["proxies", "tokio"] }
+atspi-connection = { version = "0.14", default-features = false }
+futures-util = "0.3"
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "windows")'.dependencies.tray-icon]
+version = "0.26"
+optional = true
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies.image]
+version = "0.25"
+default-features = false
+features = ["png"]
+optional = true
+
+[target.'cfg(target_os = "linux")'.dependencies.ksni]
+version = "0.3.7"
+features = ["blocking"]
+optional = true
+
+[features]
+desktop-ui = ["dep:tray-icon", "dep:image", "dep:ksni"]
+linux-integration = ["dep:ashpd", "dep:atspi", "dep:atspi-connection", "dep:futures-util", "dep:zbus"]
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread"] }
