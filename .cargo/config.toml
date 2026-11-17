@@ -2,4 +2,9 @@
 MACOSX_DEPLOYMENT_TARGET = "26.0"
 
 [target.x86_64-unknown-linux-gnu]
+# Required by Sherpa's prebuilt static x64 Linux archive.
 rustflags = ["-C", "relocation-model=dynamic-no-pic"]
+
+[target.x86_64-pc-windows-msvc]
+# ONNX Runtime's static library imports the Windows ETW functions.
+rustflags = ["-C", "link-arg=advapi32.lib"]

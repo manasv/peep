@@ -10,6 +10,20 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+#[test]
+fn dbus_connects_without_a_tokio_runtime() {
+    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        assert!(std::env::var_os("PEEP_REQUIRE_DBUS_TESTS").is_none());
+        return;
+    }
+    async_io::block_on(async {
+        let connection = zbus::Connection::session().await.unwrap();
+        let bus = zbus::fdo::DBusProxy::new(&connection).await.unwrap();
+        assert!(!bus.get_id().await.unwrap().is_empty());
+        connection.close().await.unwrap();
+    });
+}
+
 #[derive(Default)]
 struct StateData {
     text: String,

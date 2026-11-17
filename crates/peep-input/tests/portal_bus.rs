@@ -69,19 +69,26 @@ fn path(header: &Header<'_>, kind: &str, options: &Dict, key: &str) -> OwnedObje
         .unwrap()
 }
 fn response(connection: Connection, path: OwnedObjectPath, code: u32, results: Dict) {
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        connection
-            .emit_signal(
-                None::<&str>,
-                &path,
-                "org.freedesktop.portal.Request",
-                "Response",
-                &(code, results),
-            )
-            .await
-            .unwrap();
-    });
+    let emitter = connection.clone();
+    connection
+        .executor()
+        .spawn(
+            async move {
+                async_io::Timer::after(Duration::from_millis(10)).await;
+                emitter
+                    .emit_signal(
+                        None::<&str>,
+                        &path,
+                        "org.freedesktop.portal.Request",
+                        "Response",
+                        &(code, results),
+                    )
+                    .await
+                    .unwrap();
+            },
+            "fixture response",
+        )
+        .detach();
 }
 #[zbus::interface(name = "org.freedesktop.portal.GlobalShortcuts")]
 impl Portal {
