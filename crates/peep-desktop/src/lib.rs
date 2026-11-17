@@ -1,3 +1,5 @@
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use peep_input::tray;
 pub mod worker;
 
 use anyhow::{Result, anyhow, bail};
@@ -6,6 +8,7 @@ use global_hotkey::{
     hotkey::{HotKey, Modifiers},
 };
 use peep_core::{Command, Event};
+use peep_input::Job as DeliveryJob;
 use peep_runtime::{Preferences, audio::Audio, models::ONNX};
 use std::{cell::RefCell, path::PathBuf, sync::mpsc};
 use tokio_util::sync::CancellationToken;
@@ -27,6 +30,18 @@ struct Services {
     active_id: u64,
     worker_busy: bool,
     shutting_down: bool,
+    delivery: mpsc::Sender<DeliveryJob>,
+    pending_capture: bool,
+    copy_only: bool,
+    insertion_allowed: bool,
+    shortcut_generation: u64,
+    portal_label: String,
+    #[cfg(target_os = "linux")]
+    portal: Option<async_channel::Sender<peep_input::portal::Command>>,
+    #[cfg(target_os = "linux")]
+    control_shutdown: async_channel::Sender<()>,
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    tray: Option<tray::Tray>,
 }
 
 impl Services {
@@ -35,7 +50,39 @@ impl Services {
             eprintln!("Peep settings could not load: {error}");
             Preferences::default()
         });
-        let (speech, cleanup) = worker::spawn(events.clone());
+        let (speech, speech_cleanup) = worker::spawn(events.clone());
+        let (delivery, delivery_cleanup) = peep_input::spawn(events.clone());
+        #[cfg(target_os = "linux")]
+        let (portal, portal_cleanup) = if is_wayland() {
+            let (tx, done) = peep_input::portal::spawn(events.clone());
+            (Some(tx), Some(done))
+        } else {
+            (None, None)
+        };
+        #[cfg(target_os = "linux")]
+        let (control_shutdown, control_cleanup) = peep_input::control::spawn(events.clone());
+        let (cleanup_tx, cleanup) = async_channel::bounded(1);
+        std::thread::Builder::new()
+            .name("peep-worker-cleanup".into())
+            .spawn(move || {
+                let _ = speech_cleanup.recv_blocking();
+                let _ = delivery_cleanup.recv_blocking();
+                #[cfg(target_os = "linux")]
+                if let Some(cleanup) = portal_cleanup {
+                    let _ = cleanup.recv_blocking();
+                }
+                #[cfg(target_os = "linux")]
+                let _ = control_cleanup.recv_blocking();
+                let _ = cleanup_tx.try_send(());
+            })?;
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        let tray = match tray::Tray::new(events.clone()) {
+            Ok(tray) => Some(tray),
+            Err(error) => {
+                eprintln!("Peep tray unavailable: {error}");
+                None
+            }
+        };
         let hotkey_events = events.clone();
         GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
             if event.state == HotKeyState::Pressed {
@@ -64,6 +111,18 @@ impl Services {
             active_id: 0,
             worker_busy: false,
             shutting_down: false,
+            delivery,
+            pending_capture: false,
+            copy_only: false,
+            insertion_allowed: false,
+            shortcut_generation: 0,
+            portal_label: String::new(),
+            #[cfg(target_os = "linux")]
+            portal,
+            #[cfg(target_os = "linux")]
+            control_shutdown,
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            tray,
         };
         service.register_shortcut();
         Ok((service, cleanup))
@@ -80,6 +139,32 @@ impl Services {
 
     fn register_shortcut(&mut self) {
         self.shortcut_error.clear();
+        self.shortcut_generation = self.shortcut_generation.wrapping_add(1);
+        self.portal_label.clear();
+        #[cfg(target_os = "linux")]
+        if let Some(portal) = &self.portal {
+            let trigger = if self.preferences.shortcut_enabled && !self.recording_shortcut {
+                match peep_input::portal::trigger(&self.preferences.shortcut) {
+                    Ok(trigger) => Some(trigger),
+                    Err(error) => {
+                        self.shortcut_error = error.to_string();
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            if portal
+                .try_send(peep_input::portal::Command::Bind {
+                    generation: self.shortcut_generation,
+                    trigger,
+                })
+                .is_err()
+            {
+                self.shortcut_error = "Shortcut portal disconnected".into();
+            }
+            return;
+        }
         let Some(manager) = &self.hotkeys else {
             self.shortcut_error = "Global shortcuts unavailable; use Record below".into();
             return;
@@ -102,9 +187,16 @@ impl Services {
     fn permissions(&self) {
         let _ = self.events.try_send(Event {
             kind: "settings".into(),
-            shortcut: shortcut_display_name(&self.preferences.shortcut),
+            shortcut: if self.portal_label.is_empty() {
+                shortcut_display_name(&self.preferences.shortcut)
+            } else {
+                self.portal_label.clone()
+            },
             shortcut_enabled: self.preferences.shortcut_enabled,
-            shortcut_available: self.registered.is_some(),
+            shortcut_available: self.registered.is_some() || !self.portal_label.is_empty(),
+            shortcut_portal: cfg!(target_os = "linux") && is_wayland(),
+            accessibility: self.insertion_allowed,
+            microphone: "Allowed".into(),
             text: self.shortcut_error.clone(),
             ..Default::default()
         });
@@ -117,7 +209,7 @@ impl Services {
     }
 
     fn begin(&mut self, id: u64) -> Result<CancellationToken> {
-        if self.worker_busy || self.capture.is_some() {
+        if self.worker_busy || self.capture.is_some() || self.pending_capture {
             bail!("The previous recording is still finishing.");
         }
         self.active_id = id;
@@ -132,6 +224,7 @@ impl Services {
         match command {
             Command::Initialize => {
                 self.permissions();
+                self.delivery.send(DeliveryJob::CheckAccessibility)?;
                 let args: Vec<String> = std::env::args().collect();
                 let path = args
                     .iter()
@@ -161,6 +254,14 @@ impl Services {
             }
             Command::Start { id } => {
                 self.begin(id)?;
+                self.pending_capture = true;
+                self.copy_only = false;
+                self.delivery
+                    .send(DeliveryJob::Capture(id, self.cancel.clone()))?;
+            }
+            Command::StartCopy { id } => {
+                self.begin(id)?;
+                self.copy_only = true;
                 self.capture = Some(Audio::start(id, self.events.clone())?);
                 self.emit("recording", id, "");
             }
@@ -178,16 +279,26 @@ impl Services {
                 ))?;
                 self.worker_busy = true;
             }
-            Command::Deliver { id, .. } if id == self.active_id => self.emit("copy_ready", id, ""),
+            Command::Deliver { id, text } if id == self.active_id => {
+                if self.copy_only {
+                    self.emit("copy_ready", id, "");
+                } else {
+                    self.delivery.send(DeliveryJob::Deliver(id, text))?;
+                }
+            }
             Command::Cancel { id } if id == self.active_id => {
                 self.capture.take();
+                self.pending_capture = false;
                 self.cancel.cancel();
+                self.delivery.send(DeliveryJob::Discard(id))?;
                 if !self.worker_busy {
                     self.emit("canceled", id, "");
                 }
             }
             Command::Discard { id } if id == self.active_id => {
                 self.capture.take();
+                self.pending_capture = false;
+                self.delivery.send(DeliveryJob::Discard(id))?;
             }
             Command::Copy { text } => {
                 if !text.is_empty() {
@@ -203,6 +314,15 @@ impl Services {
                 }
             }
             Command::RecordShortcut => {
+                #[cfg(target_os = "linux")]
+                if let Some(portal) = &self.portal {
+                    if self.portal_label.is_empty() {
+                        self.register_shortcut();
+                    } else {
+                        portal.try_send(peep_input::portal::Command::Configure)?;
+                    }
+                    return Ok(());
+                }
                 self.recording_shortcut = true;
                 self.register_shortcut();
             }
@@ -250,7 +370,25 @@ impl Services {
                 self.register_shortcut();
                 self.permissions();
             }
-            Command::RefreshPermissions => self.permissions(),
+            Command::Accessibility => {
+                self.delivery.send(DeliveryJob::EnableAccessibility)?;
+            }
+            Command::RefreshPermissions => {
+                self.delivery.send(DeliveryJob::CheckAccessibility)?;
+                self.permissions();
+            }
+            Command::Presentation {
+                title,
+                phase,
+                can_copy,
+            } => {
+                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                if let Some(tray) = &self.tray {
+                    tray.update(&title, phase, can_copy);
+                }
+                #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                let _ = (title, phase, can_copy);
+            }
             Command::Shutdown => {
                 self.shutting_down = true;
                 self.capture.take();
@@ -260,6 +398,14 @@ impl Services {
                 {
                     let _ = manager.unregister(key);
                 }
+                self.pending_capture = false;
+                self.delivery.send(DeliveryJob::Shutdown)?;
+                #[cfg(target_os = "linux")]
+                if let Some(portal) = &self.portal {
+                    let _ = portal.try_send(peep_input::portal::Command::Shutdown);
+                }
+                #[cfg(target_os = "linux")]
+                let _ = self.control_shutdown.try_send(());
                 self.speech.send(worker::Job::Shutdown)?;
             }
             _ => {}
@@ -269,6 +415,54 @@ impl Services {
 
     fn event(&mut self, event: &Event) -> bool {
         match event.kind.as_str() {
+            "control_ready" => true,
+            "target_ready" if event.id == self.active_id => {
+                if self.pending_capture && !self.shutting_down && !self.cancel.is_cancelled() {
+                    self.pending_capture = false;
+                    match Audio::start(event.id, self.events.clone()) {
+                        Ok(capture) => {
+                            self.capture = Some(capture);
+                            self.emit("recording", event.id, "");
+                        }
+                        Err(error) => self.emit("error", event.id, error.to_string()),
+                    }
+                }
+                true
+            }
+            "insertion_permission" => {
+                self.insertion_allowed = event.accessibility;
+                if !event.text.is_empty() {
+                    self.emit("notice", 0, event.text.clone());
+                }
+                self.permissions();
+                true
+            }
+            "portal_shortcut_ready" | "portal_shortcut_failed"
+                if event.id == self.shortcut_generation =>
+            {
+                if event.kind == "portal_shortcut_ready" {
+                    self.portal_label = event.text.clone();
+                    self.shortcut_error.clear();
+                } else {
+                    self.portal_label.clear();
+                    self.shortcut_error = format!(
+                        "{}; bind peep --toggle in desktop shortcut settings",
+                        event.text
+                    );
+                }
+                self.permissions();
+                true
+            }
+            "portal_hotkey" => {
+                if event.id == self.shortcut_generation
+                    && !self.shutting_down
+                    && self.preferences.shortcut_enabled
+                    && !self.portal_label.is_empty()
+                {
+                    self.emit("toggle_dictation", 0, "");
+                }
+                true
+            }
             "hotkey" => {
                 if !self.shutting_down && self.registered.map(|key| key.id as u64) == Some(event.id)
                 {
@@ -296,6 +490,11 @@ impl Services {
             _ => false,
         }
     }
+}
+
+fn is_wayland() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty())
+        || std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland")
 }
 
 fn global_shortcuts_supported() -> bool {
@@ -387,4 +586,23 @@ mod tests {
         assert!(parse_shortcut("Shift+Space").is_err());
         assert_eq!(shortcut_display_name("Control+Alt+Digit2"), "Control–Alt–2");
     }
+}
+
+#[cfg(target_os = "linux")]
+pub fn handle_cli() -> anyhow::Result<bool> {
+    let actions: Vec<_> = std::env::args()
+        .filter(|arg| matches!(arg.as_str(), "--toggle" | "--stop" | "--cancel" | "--open"))
+        .collect();
+    if actions.len() > 1 {
+        anyhow::bail!("Use only one desktop control command at a time.");
+    }
+    if let Some(action) = actions.first() {
+        peep_input::control::send(action)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+#[cfg(target_os = "linux")]
+pub fn open_existing() {
+    let _ = peep_input::control::send("--open");
 }

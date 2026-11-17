@@ -32,6 +32,9 @@ def main():
         executable = 'peep.exe' if system == 'windows' else 'peep'
         shutil.copy2(ROOT / 'target/release' / executable, bundle / executable)
         shutil.copy2(ROOT / 'LICENSE', bundle / 'LICENSE')
+        if system == 'linux':
+            shutil.copy2(ROOT / 'assets/dev.peep.app.desktop', bundle / 'dev.peep.app.desktop')
+            shutil.copy2(ROOT / 'assets/icons/PeepIcon-128.png', bundle / 'dev.peep.app.png')
         shutil.copytree(ROOT / 'assets/notices', bundle / 'notices')
         package = shutil.make_archive(str(staging / 'release'), 'zip' if system == 'windows' else 'gztar',
                                       root_dir=staging, base_dir=name)

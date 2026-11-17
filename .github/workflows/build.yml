@@ -29,7 +29,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libudev-dev libx11-xcb-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libvulkan-dev
+          sudo apt-get install -y clang cmake pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libudev-dev libx11-xcb-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libvulkan-dev dbus-x11 at-spi2-core libatk-adaptor python3-gi gir1.2-gtk-3.0 xvfb openbox sway wtype
       - name: Configure Windows native tools
         if: runner.os == 'Windows'
         shell: pwsh
@@ -48,6 +48,20 @@ jobs:
         run: cargo test --workspace --locked
       - name: Lint
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Test Wayland portal and accessibility protocols
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- env PEEP_REQUIRE_DBUS_TESTS=1 cargo test -p peep-input --features linux-integration --locked --test linux_bus --test portal_bus
+      - name: Test native X11 text delivery
+        if: runner.os == 'Linux'
+        run: ./script/test_linux_desktop.sh x11
+      - name: Test native Wayland text delivery
+        if: runner.os == 'Linux'
+        run: ./script/test_linux_desktop.sh wayland
+      - name: Test native Windows text delivery
+        if: runner.os == 'Windows'
+        env:
+          PEEP_TEST_WINDOWS_UI: '1'
+        run: cargo test -p peep-input --locked --test windows_editor -- --nocapture
       - name: Test ONNX inference with public speech fixture
         if: runner.os != 'macOS'
         run: python script/test_inference.py --backend onnx

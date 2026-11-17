@@ -40,6 +40,9 @@ pub enum Command {
     Start {
         id: u64,
     },
+    StartCopy {
+        id: u64,
+    },
     Stop {
         id: u64,
     },
@@ -86,6 +89,7 @@ pub struct Event {
     pub shortcut: String,
     pub shortcut_enabled: bool,
     pub shortcut_available: bool,
+    pub shortcut_portal: bool,
     pub indicator: bool,
     pub accessibility: bool,
     pub microphone: String,

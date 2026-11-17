@@ -192,7 +192,9 @@ impl Peep {
             } else {
                 "Text insertion"
             },
-            if allowed {
+            if allowed && !platform::MACOS {
+                "Accessibility is available"
+            } else if allowed {
                 "Manage in System Settings"
             } else if microphone {
                 "Click to allow microphone access"
@@ -411,13 +413,13 @@ impl Render for Peep {
                                 matches!(phase, Phase::NeedsModel | Phase::Downloading),
                                 |d| d.child(self.setup(p, cx)),
                             )
-                            .when(!platform::NATIVE_INSERTION, |d| {
+                            .when(!platform::MACOS, |d| {
                                 #[cfg(any(not(target_os = "macos"), feature = "desktop-preview"))]
                                 let d = d.child(
                                     self.card(p).py_4().gap_3()
-                                        .child(div().text_xs().text_color(rgb(p.muted)).child("Record, then copy and paste your text into another app."))
+                                        .child(div().text_xs().text_color(rgb(p.muted)).child("Use your shortcut in another app to insert text. Record here to copy and paste instead."))
                                         .when(phase == Phase::Ready && self.session.transcript.is_empty(), |d| {
-                                            d.child(self.control(8, "Record", UiAction::Record, !self.recording_shortcut, p, cx))
+                                            d.child(self.control(8, "Record to clipboard", UiAction::Record, !self.recording_shortcut, p, cx))
                                         })
                                         .when(!self.session.transcript.is_empty(), |d| {
                                             d.child(div().text_sm().child(self.session.transcript.clone()))
@@ -478,7 +480,7 @@ impl Render for Peep {
                                                         shortcut.to_owned()
                                                     },
                                                     UiAction::RecordShortcut,
-                                                    !busy && !self.recording_shortcut,
+                                                    !busy && !self.recording_shortcut && (!self.preferences.shortcut_portal || self.preferences.shortcut_enabled),
                                                     p,
                                                     cx,
                                                 )
@@ -490,7 +492,7 @@ impl Render for Peep {
                                     )
                                     .child(div().h_px().bg(rgb(p.line)))
                                     .child(self.setting_row(
-                                        if platform::NATIVE_INSERTION { "Dictation" } else { "Global shortcut" },
+                                        if platform::MACOS { "Dictation" } else { "Global shortcut" },
                                         "",
                                         self.toggle(
                                             1,
@@ -503,7 +505,7 @@ impl Render for Peep {
                                         p,
                                     ))
                                     .child(div().h_px().bg(rgb(p.line)))
-                                    .when(platform::NATIVE_INSERTION, |d| d.child(self.setting_row(
+                                    .when(platform::MACOS, |d| d.child(self.setting_row(
                                         "Floating indicator",
                                         "",
                                         self.toggle(
@@ -519,10 +521,16 @@ impl Render for Peep {
                                     .child(div().h_px().bg(rgb(p.line)))
                                     .child(self.access_row(true, 4, p, cx))
                                     .child(div().h_px().bg(rgb(p.line)))
-                                    .child(self.access_row(false, 5, p, cx))),
+                                    .child(self.access_row(false, 5, p, cx)))
+                                    .when(!platform::MACOS, |d| d.child(self.access_row(false, 5, p, cx))),
                             )
-                            .when(platform::NATIVE_INSERTION, |d| d.child(
-                                div().flex().justify_end().child(
+                            .child(
+                                div().flex().justify_between().when(platform::MACOS, |d| d.justify_end())
+                                .when(!platform::MACOS, |d| {
+                                    #[cfg(any(not(target_os = "macos"), feature = "desktop-preview"))]
+                                    let d = d.child(self.control(13, "Quit Peep", UiAction::Quit, true, p, cx).border_0().bg(rgb(p.base)).text_color(rgb(p.muted)));
+                                    d
+                                }).child(
                                     self.control(
                                         6,
                                         "Refresh permissions",
@@ -535,7 +543,7 @@ impl Render for Peep {
                                     .bg(rgb(p.base))
                                     .text_color(rgb(p.muted)),
                                 ),
-                            )),
+                            ),
                     ),
             )
     }

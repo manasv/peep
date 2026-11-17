@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Peep
+Comment=Offline dictation
+Exec=peep
+Icon=dev.peep.app
+Terminal=false
+Categories=Utility;Accessibility;
+StartupWMClass=dev.peep.app

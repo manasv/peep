@@ -11,9 +11,9 @@ Peep transcribes locally using Parakeet. Audio and transcripts stay in memory;
 there's no recording archive or transcript history. After the initial model
 download, dictation works offline.
 
-On macOS, Peep lives in the menu bar and inserts text into the focused app.
-The experimental Windows and Linux ports show the transcript for you to copy
-and paste. macOS keeps its Core ML backend; Windows and Linux use ONNX on the CPU.
+Use a global shortcut to dictate into the focused app. Peep runs in the
+background with menu bar or tray controls. macOS uses Core ML; Windows and Linux
+use ONNX on the CPU.
 
 ## Getting started
 
@@ -39,14 +39,15 @@ under **Privacy & Security → Microphone** and **Accessibility**.
 
 ### Windows and Linux
 
-The ports target Windows x64 and Linux x64 and are still experimental.
+Windows x64 and Linux x64 have native backends. Linux supports X11 and Wayland.
+These ports still need testing across more apps and desktop environments.
 Windows builds need the MSVC C++ tools, Windows SDK, CMake, and LLVM/libclang.
 Use a Visual Studio developer terminal. If needed, set `LIBCLANG_PATH` to LLVM's
 `bin` directory and `GPUI_FXC_PATH` to the SDK's `fxc.exe`.
 On Ubuntu, install the native libraries first:
 
 ```sh
-sudo apt-get install clang cmake pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libudev-dev libx11-xcb-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libvulkan-dev
+sudo apt-get install clang cmake pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libudev-dev libx11-xcb-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libvulkan-dev at-spi2-core xdg-desktop-portal
 ```
 
 From a checkout of this repository:
@@ -55,11 +56,31 @@ From a checkout of this repository:
 cargo run --release --locked -p peep
 ```
 
-Download the model when prompted (about 671 MB). Press **Record**, then
-**Finish**, and use **Copy text** to paste the result into your app.
-Control–Shift–Space also works on Windows and Linux X11. On Wayland, use the
-window controls; global shortcuts aren't implemented yet. Closing the window
-quits Peep on Windows and Linux.
+Download the model when prompted (about 671 MB). Focus a text field in another
+app, press **Control–Shift–Space**, speak, then press it again to insert the text.
+**Record to clipboard** in the Peep window lets you dictate without a destination.
+Closing the window minimizes Peep; quit through the tray, the window's Quit
+button, or Ctrl–Q.
+
+On Linux, enable **Text insertion** in Peep to activate accessibility support.
+The destination app must expose editable text through AT-SPI. Some browsers and
+Electron apps need accessibility enabled in their own settings or launch options.
+Replacing a selection is supported in plain entry fields; clear selections in
+rich or multiline editors before dictating.
+
+Wayland shortcuts use your desktop's Global Shortcuts portal. The desktop asks
+for permission and manages the actual key combination. Click the shortcut button
+in Peep to configure it. This needs `xdg-desktop-portal` and a desktop backend
+that implements Global Shortcuts.
+
+For compositors without that portal, bind `peep --toggle` in the compositor's
+shortcut settings while Peep is running. `--stop`, `--cancel`, and `--open` are
+also available. These commands use the local session bus.
+
+The Linux archive includes a desktop entry and icon. Put `peep` on your PATH and
+install those files as `~/.local/share/applications/dev.peep.app.desktop` and
+`~/.local/share/icons/hicolor/128x128/apps/dev.peep.app.png` for app identification.
+Tray visibility depends on the desktop's StatusNotifierItem support.
 
 ## Usage on macOS
 
@@ -81,7 +102,8 @@ Peep is built with Rust, [GPUI](https://github.com/zed-industries/zed), and
 [Scriptrs](https://github.com/avencera/scriptrs) on macOS, with
 [Sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) on Windows and Linux.
 `peep-core` holds the dictation state; `peep-runtime` shares audio, downloads,
-and settings. `peep-macos` and `peep-desktop` provide the platform backends.
+and settings. `peep-macos` and `peep-desktop` provide the platform backends. `peep-input`
+implements Windows UI Automation, Linux AT-SPI, portals, and desktop controls.
 
 ```sh
 cargo fmt --all -- --check
@@ -97,6 +119,11 @@ Run `python3 script/test_inference.py --backend coreml` on a Mac or
 `python3 script/test_inference.py --backend onnx` for the portable backend.
 These download verified model files and a public speech fixture. Ordinary
 workspace tests skip inference unless fixture environment variables are set.
+
+Desktop integration tests use a private D-Bus session and disposable editor
+fixtures. `script/test_linux_desktop.sh x11` uses Xvfb/Openbox; `wayland` uses a
+headless Sway compositor. Windows UI tests run with `PEEP_TEST_WINDOWS_UI=1`.
+The CI workflow installs the dependencies and runs these tests.
 
 For release archives, use `./script/package_release.sh` on macOS or
 `python3 script/package_desktop.py` on Windows/Linux. CI builds all three platforms.

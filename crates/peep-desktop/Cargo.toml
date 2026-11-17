@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+peep-input = { path = "../peep-input", features = ["desktop-ui"] }
 peep-core = { path = "../peep-core" }
 peep-runtime = { path = "../peep-runtime" }
 anyhow = "1"
