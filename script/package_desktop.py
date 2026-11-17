@@ -33,6 +33,14 @@ def main():
         shutil.copy2(ROOT / 'target/release' / executable, bundle / executable)
         shutil.copy2(ROOT / 'LICENSE', bundle / 'LICENSE')
         if system == 'linux':
+            for library in ('libsherpa-onnx-c-api.so', 'libonnxruntime.so'):
+                shutil.copy2(ROOT / 'target/release' / library, bundle / library)
+            environment = {key: value for key, value in os.environ.items() if key != 'LD_LIBRARY_PATH'}
+            check = subprocess.run(['ldd', '-r', str(bundle / executable)],
+                                   env=environment, capture_output=True, text=True)
+            diagnostics = check.stdout + check.stderr
+            if check.returncode or 'not found' in diagnostics or 'undefined symbol' in diagnostics:
+                raise RuntimeError(f'Packaged Linux libraries could not be resolved:\n{diagnostics}')
             shutil.copy2(ROOT / 'assets/dev.peep.app.desktop', bundle / 'dev.peep.app.desktop')
             shutil.copy2(ROOT / 'assets/icons/PeepIcon-128.png', bundle / 'dev.peep.app.png')
         shutil.copytree(ROOT / 'assets/notices', bundle / 'notices')

@@ -77,8 +77,10 @@ For compositors without that portal, bind `peep --toggle` in the compositor's
 shortcut settings while Peep is running. `--stop`, `--cancel`, and `--open` are
 also available. These commands use the local session bus.
 
-The Linux archive includes a desktop entry and icon. Put `peep` on your PATH and
-install those files as `~/.local/share/applications/dev.peep.app.desktop` and
+The Linux archive includes shared libraries, a desktop entry, and an icon.
+Keep the `.so` files beside `peep` and symlink the executable onto your PATH.
+Install the desktop entry and icon as
+`~/.local/share/applications/dev.peep.app.desktop` and
 `~/.local/share/icons/hicolor/128x128/apps/dev.peep.app.png` for app identification.
 Tray visibility depends on the desktop's StatusNotifierItem support.
 

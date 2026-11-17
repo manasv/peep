@@ -11,9 +11,14 @@ peep-runtime = { path = "../peep-runtime" }
 anyhow = "1"
 async-channel = "2"
 global-hotkey = "0.10"
-sherpa-rs = { version = "=0.6.8", default-features = false, features = ["download-binaries", "static"] }
 tokio = { version = "1", features = ["rt", "time", "macros"] }
 tokio-util = { version = "0.7", features = ["rt"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+sherpa-rs = { version = "=0.6.8", default-features = false, features = ["download-binaries"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+sherpa-rs = { version = "=0.6.8", default-features = false, features = ["download-binaries", "static"] }
 
 [dev-dependencies]
 hound = "3.5"
