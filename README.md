@@ -77,6 +77,9 @@ For compositors without that portal, bind `peep --toggle` in the compositor's
 shortcut settings while Peep is running. `--stop`, `--cancel`, and `--open` are
 also available. These commands use the local session bus.
 
+Windows release archives require the
+[x64 Visual C++ Redistributable](https://aka.ms/vc14/vc_redist.x64.exe).
+
 The Linux archive includes shared libraries, a desktop entry, and an icon.
 Keep the `.so` files beside `peep` and symlink the executable onto your PATH.
 Install the desktop entry and icon as

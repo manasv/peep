@@ -11,6 +11,22 @@ import tomllib
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def windows_architecture(executable):
+    with executable.open('rb') as image:
+        if image.read(2) != b'MZ':
+            raise RuntimeError(f'Invalid Windows executable: {executable}')
+        image.seek(0x3C)
+        offset = int.from_bytes(image.read(4), 'little')
+        image.seek(offset)
+        if image.read(4) != b'PE\0\0':
+            raise RuntimeError(f'Invalid PE header: {executable}')
+        machine = int.from_bytes(image.read(2), 'little')
+    architectures = {0x8664: 'amd64', 0xAA64: 'arm64'}
+    if machine not in architectures:
+        raise RuntimeError(f'Unsupported Windows executable architecture: 0x{machine:04X}')
+    return architectures[machine]
+
+
 def main():
     parser = argparse.ArgumentParser(description='Build a Windows or Linux release archive.')
     parser.add_argument('--output-dir', type=Path, default=ROOT / '.build/release')
@@ -24,7 +40,9 @@ def main():
         target = ROOT / target
     release = target / 'release'
     version = tomllib.loads((ROOT / 'Cargo.toml').read_text())['workspace']['package']['version']
-    name = f'Peep-{version}-{system}-{platform.machine().lower()}'
+    executable = 'peep.exe' if system == 'windows' else 'peep'
+    architecture = windows_architecture(release / executable) if system == 'windows' else platform.machine().lower()
+    name = f'Peep-{version}-{system}-{architecture}'
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
     suffix = '.zip' if system == 'windows' else '.tar.gz'
@@ -33,7 +51,6 @@ def main():
         staging = Path(temporary)
         bundle = staging / name
         bundle.mkdir()
-        executable = 'peep.exe' if system == 'windows' else 'peep'
         shutil.copy2(release / executable, bundle / executable)
         shutil.copy2(ROOT / 'LICENSE', bundle / 'LICENSE')
         if system == 'linux':
