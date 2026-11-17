@@ -1,0 +1,4 @@
+[package]
+name = "peep-core"
+version.workspace = true
+edition.workspace = true
