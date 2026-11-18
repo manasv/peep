@@ -59,10 +59,10 @@ pub enum Command {
     Copy {
         text: String,
     },
-    Notify {
+    Feedback {
         text: String,
-        recover_text: Option<String>,
     },
+    DismissFeedback,
     Settings {
         key: String,
         value: bool,

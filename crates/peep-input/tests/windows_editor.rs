@@ -230,35 +230,6 @@ fn native_windows_delivery_preserves_text_and_rejects_changed_or_protected_field
     let mut context = NativeContext::new().unwrap();
     message(frame, WM_NULL, WPARAM(0), LPARAM(0));
     reset();
-    unsafe {
-        let toast = CreateWindowExW(
-            WS_EX_TOOLWINDOW,
-            w!("STATIC"),
-            w!("Peep notification"),
-            WS_POPUP,
-            100,
-            100,
-            380,
-            128,
-            None,
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-        peep_input::show_toast_window(toast.0 as isize, 100., 100., 380., 128.).unwrap();
-        assert!(IsWindowVisible(toast).as_bool());
-        assert_eq!(
-            GetForegroundWindow(),
-            frame,
-            "A notification must not take focus from the editor"
-        );
-        assert_ne!(
-            GetWindowLongPtrW(toast, GWL_EXSTYLE) & WS_EX_NOACTIVATE.0 as isize,
-            0
-        );
-        DestroyWindow(toast).unwrap();
-    }
     let target = context.capture().unwrap();
     assert!(target.belongs_to_process(fixture.0.id()));
     context

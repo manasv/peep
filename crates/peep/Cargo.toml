@@ -15,7 +15,6 @@ peep-macos = { path = "../peep-macos" }
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-raw-window-handle = "0.6"
 peep-desktop = { path = "../peep-desktop" }
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "windows-manifest"] }
 

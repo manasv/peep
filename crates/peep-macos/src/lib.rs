@@ -42,26 +42,6 @@ pub fn configure_application() {
     unsafe { NSUserDefaults::standardUserDefaults().registerDefaults(&defaults) };
 }
 
-/// Shows a non-activating notification panel.
-///
-/// # Safety
-/// Both pointers must refer to live NSViews on the main thread.
-pub unsafe fn show_toast_window(
-    view: std::ptr::NonNull<std::ffi::c_void>,
-    settings: Option<std::ptr::NonNull<std::ffi::c_void>>,
-) {
-    let mtm = MainThreadMarker::new().expect("notification runs on the main thread");
-    let hidden = objc2_app_kit::NSApplication::sharedApplication(mtm).isHidden();
-    let view = unsafe { &*view.cast::<objc2_app_kit::NSView>().as_ptr() };
-    if let Some(window) = view.window() {
-        window.setHidesOnDeactivate(false);
-        window.orderFrontRegardless();
-    }
-    if hidden && let Some(settings) = settings {
-        unsafe { hide_settings_window(settings) };
-    }
-}
-
 /// Hides only the settings window, without discarding its UI state.
 ///
 /// # Safety
@@ -467,7 +447,12 @@ impl Services {
                         self.preferences.shortcut_enabled = value;
                         self.register_shortcut();
                     }
-                    "showRecordingIndicator" => self.preferences.indicator = value,
+                    "showRecordingIndicator" => {
+                        self.preferences.indicator = value;
+                        if !value {
+                            self.indicator.hide();
+                        }
+                    }
                     _ => {}
                 }
                 self.save();
@@ -565,6 +550,10 @@ impl Services {
                     mtm,
                 );
             }
+            Command::Feedback { text } if self.preferences.indicator && !self.shutting_down => {
+                self.indicator.feedback(&text, mtm);
+            }
+            Command::DismissFeedback => self.indicator.dismiss_feedback(),
             Command::Shutdown if !self.shutting_down => {
                 self.shutting_down = true;
                 self.capture.take();
@@ -576,7 +565,7 @@ impl Services {
                 if let Some(hotkey) = self.registered.take() {
                     let _ = self.hotkeys.unregister(hotkey);
                 }
-                self.indicator.update("", false, false, mtm);
+                self.indicator.hide();
                 self.delivery.send(delivery::Job::Shutdown)?;
                 self.speech.send(worker::Job::Shutdown)?;
             }

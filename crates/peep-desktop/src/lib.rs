@@ -1,5 +1,3 @@
-#[cfg(target_os = "windows")]
-pub use peep_input::show_toast_window;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use peep_input::tray;
 pub mod worker;
@@ -390,12 +388,6 @@ impl Services {
                 }
                 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
                 let _ = (title, phase, can_copy);
-            }
-            Command::Notify { text, recover_text } => {
-                #[cfg(target_os = "linux")]
-                peep_input::notifications::notify(text, recover_text, self.events.clone());
-                #[cfg(not(target_os = "linux"))]
-                let _ = (text, recover_text);
             }
             Command::Shutdown => {
                 self.shutting_down = true;

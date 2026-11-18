@@ -5,12 +5,37 @@ use objc2_app_kit::{
     NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
-use std::cell::{Cell, RefCell};
+use std::{
+    cell::{Cell, RefCell},
+    time::{Duration, Instant},
+};
 
 const BAR_COUNT: usize = 9;
 const BAR_WIDTH: f64 = 3.;
 const BAR_GAP: f64 = 3.;
 const WAVE_HEIGHT: f64 = 24.;
+const FEEDBACK_DURATION: Duration = Duration::from_millis(2500);
+
+#[derive(Default)]
+struct Feedback {
+    until: Option<Instant>,
+}
+impl Feedback {
+    fn show(&mut self, now: Instant) {
+        self.until = Some(now + FEEDBACK_DURATION);
+    }
+    fn clear(&mut self) {
+        self.until = None;
+    }
+    fn expire(&mut self, now: Instant) -> bool {
+        if self.until.is_some_and(|until| now >= until) {
+            self.clear();
+            true
+        } else {
+            false
+        }
+    }
+}
 
 #[derive(Default)]
 struct Waveform {
@@ -36,6 +61,7 @@ pub struct Indicator {
     bars: Vec<Retained<NSView>>,
     recording: Cell<bool>,
     waveform: RefCell<Waveform>,
+    feedback: RefCell<Feedback>,
 }
 impl Indicator {
     pub fn new(mtm: MainThreadMarker) -> Self {
@@ -104,9 +130,31 @@ impl Indicator {
             bars,
             recording: Cell::new(false),
             waveform: RefCell::new(Waveform::default()),
+            feedback: RefCell::new(Feedback::default()),
         }
     }
     pub fn update(&self, text: &str, recording: bool, visible: bool, mtm: MainThreadMarker) {
+        if !visible && self.feedback.borrow().until.is_some() {
+            return;
+        }
+        self.feedback.borrow_mut().clear();
+        self.present(text, recording, visible, mtm);
+    }
+    pub fn feedback(&self, text: &str, mtm: MainThreadMarker) {
+        self.feedback.borrow_mut().show(Instant::now());
+        self.present(text, false, true, mtm);
+    }
+    pub fn dismiss_feedback(&self) {
+        if self.feedback.borrow_mut().expire(Instant::now()) {
+            self.panel.orderOut(None);
+        }
+    }
+    pub fn hide(&self) {
+        self.feedback.borrow_mut().clear();
+        self.recording.set(false);
+        self.panel.orderOut(None);
+    }
+    fn present(&self, text: &str, recording: bool, visible: bool, mtm: MainThreadMarker) {
         let recording = recording && visible;
         self.recording.set(recording);
         self.waveform.borrow_mut().reset();
@@ -159,6 +207,20 @@ impl Indicator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn feedback_expires_without_hiding_a_new_message_or_recording() {
+        let now = Instant::now();
+        let mut feedback = Feedback::default();
+        feedback.show(now);
+        assert!(!feedback.expire(now + Duration::from_secs(2)));
+        feedback.show(now + Duration::from_secs(1));
+        assert!(!feedback.expire(now + FEEDBACK_DURATION));
+        assert!(feedback.expire(now + Duration::from_secs(1) + FEEDBACK_DURATION));
+        assert!(!feedback.expire(now + Duration::from_secs(10)));
+        feedback.show(now);
+        feedback.clear();
+        assert!(!feedback.expire(now + FEEDBACK_DURATION));
+    }
     #[test]
     fn waveform_shows_recent_audio_and_returns_to_silence() {
         let mut wave = Waveform::default();
