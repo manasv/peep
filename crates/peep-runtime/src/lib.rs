@@ -40,6 +40,7 @@ pub struct Preferences {
     pub shortcut: String,
     pub shortcut_enabled: bool,
     pub indicator: bool,
+    pub dictation_language: Option<String>,
     pub model_path: Option<PathBuf>,
 }
 impl Default for Preferences {
@@ -48,6 +49,7 @@ impl Default for Preferences {
             shortcut: "Control+Shift+Space".into(),
             shortcut_enabled: true,
             indicator: true,
+            dictation_language: None,
             model_path: None,
         }
     }
@@ -95,5 +97,10 @@ mod tests {
         assert_eq!(preferences.model_path, Some(PathBuf::from("/models")));
         let defaults: Preferences = serde_json::from_str("{}").unwrap();
         assert_eq!(defaults.shortcut, Preferences::default().shortcut);
+        assert_eq!(defaults.dictation_language, None);
+        let selected: Preferences = serde_json::from_str(r#"{"dictation_language":"en"}"#).unwrap();
+        let restored: Preferences =
+            serde_json::from_str(&serde_json::to_string(&selected).unwrap()).unwrap();
+        assert_eq!(restored.dictation_language.as_deref(), Some("en"));
     }
 }

@@ -4580,6 +4580,7 @@ dependencies = [
  "peep-core",
  "peep-desktop",
  "peep-macos",
+ "raw-window-handle",
 ]
 
 [[package]]

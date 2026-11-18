@@ -107,6 +107,7 @@ impl ksni::Tray for State {
                 "cancel",
             ),
             self.item("Copy Transcript", self.can_copy, "copy"),
+            self.item("Discard Transcript", self.can_copy, "discard"),
             ksni::MenuItem::Separator,
             self.item("Open Peep", true, "open"),
             self.item("Quit Peep", true, "quit"),

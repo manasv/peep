@@ -6,6 +6,7 @@ mod clipboard;
 mod delivery;
 mod indicator;
 mod interruptions;
+mod languages;
 mod models;
 mod shortcut_conflicts;
 mod worker;
@@ -26,10 +27,51 @@ use peep_core::{Command, Event, Phase};
 use std::{cell::RefCell, path::PathBuf, sync::mpsc};
 use tray_icon::{
     TrayIcon, TrayIconBuilder,
-    menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
 };
 
 thread_local! { static SERVICES: RefCell<Option<Services>> = const { RefCell::new(None) }; }
+
+/// Configures utility-window restoration before AppKit creates any windows.
+pub fn configure_application() {
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::{NSDictionary, NSNumber, NSUserDefaults};
+    let key = NSString::from_str("ApplePersistenceIgnoreState");
+    let value = NSNumber::numberWithBool(true);
+    let defaults = NSDictionary::<NSString, AnyObject>::from_slices(&[&*key], &[value.as_ref()]);
+    unsafe { NSUserDefaults::standardUserDefaults().registerDefaults(&defaults) };
+}
+
+/// Shows a non-activating notification panel.
+///
+/// # Safety
+/// Both pointers must refer to live NSViews on the main thread.
+pub unsafe fn show_toast_window(
+    view: std::ptr::NonNull<std::ffi::c_void>,
+    settings: Option<std::ptr::NonNull<std::ffi::c_void>>,
+) {
+    let mtm = MainThreadMarker::new().expect("notification runs on the main thread");
+    let hidden = objc2_app_kit::NSApplication::sharedApplication(mtm).isHidden();
+    let view = unsafe { &*view.cast::<objc2_app_kit::NSView>().as_ptr() };
+    if let Some(window) = view.window() {
+        window.setHidesOnDeactivate(false);
+        window.orderFrontRegardless();
+    }
+    if hidden && let Some(settings) = settings {
+        unsafe { hide_settings_window(settings) };
+    }
+}
+
+/// Hides only the settings window, without discarding its UI state.
+///
+/// # Safety
+/// `view` must point to a live NSView on the main thread.
+pub unsafe fn hide_settings_window(view: std::ptr::NonNull<std::ffi::c_void>) {
+    let view = unsafe { &*view.cast::<objc2_app_kit::NSView>().as_ptr() };
+    if let Some(window) = view.window() {
+        window.orderOut(None);
+    }
+}
 
 /// The current screen's usable height, excluding the Dock, menu bar and window chrome.
 pub fn available_content_height() -> f32 {
@@ -67,22 +109,47 @@ struct StatusMenu {
     toggle: MenuItem,
     cancel: MenuItem,
     copy: MenuItem,
+    discard: MenuItem,
+    language: Submenu,
+    languages: Vec<(String, CheckMenuItem)>,
 }
 impl StatusMenu {
-    fn new(events: async_channel::Sender<Event>, mtm: MainThreadMarker) -> Result<Self> {
+    fn new(
+        events: async_channel::Sender<Event>,
+        selected_language: Option<&str>,
+        mtm: MainThreadMarker,
+    ) -> Result<Self> {
         let title = MenuItem::new("Model needed", false, None);
         let toggle = MenuItem::with_id("stop", "Stop Dictation", false, None);
         let cancel = MenuItem::with_id("cancel", "Cancel Dictation", false, None);
         let copy = MenuItem::with_id("copy", "Copy Transcript", false, None);
+        let discard = MenuItem::with_id("discard", "Discard Transcript", false, None);
         let open = MenuItem::with_id("open", "Open Peep", true, None);
         let settings = MenuItem::with_id("open_settings", "Settings…", true, None);
         let quit = MenuItem::with_id("quit", "Quit Peep", true, None);
+        let language = Submenu::new("Dictation language", true);
+        let mut languages = Vec::new();
+        for (code, label) in
+            std::iter::once(("auto", "Automatic")).chain(languages::CHOICES.iter().copied())
+        {
+            let item = CheckMenuItem::with_id(
+                format!("language:{code}"),
+                label,
+                true,
+                selected_language.unwrap_or("auto") == code,
+                None,
+            );
+            language.append(&item)?;
+            languages.push((code.to_owned(), item));
+        }
         let menu = Menu::with_items(&[
             &title,
             &PredefinedMenuItem::separator(),
             &toggle,
             &cancel,
             &copy,
+            &discard,
+            &language,
             &PredefinedMenuItem::separator(),
             &open,
             &settings,
@@ -118,7 +185,15 @@ impl StatusMenu {
             toggle,
             cancel,
             copy,
+            discard,
+            language,
+            languages,
         })
+    }
+    fn select_language(&self, code: Option<&str>) {
+        for (value, item) in &self.languages {
+            item.set_checked(value == code.unwrap_or("auto"));
+        }
     }
     fn update(&self, title: &str, phase: Phase, can_copy: bool) {
         self.title.set_text(title);
@@ -131,6 +206,15 @@ impl StatusMenu {
                 | Phase::RequestingMicrophone
         ));
         self.copy.set_enabled(can_copy);
+        self.discard.set_enabled(can_copy);
+        self.language.set_enabled(!matches!(
+            phase,
+            Phase::RequestingMicrophone
+                | Phase::Recording
+                | Phase::Transcribing
+                | Phase::Delivering
+                | Phase::Canceling
+        ));
         let _ = self.tray.set_tooltip(Some(format!("Peep — {title}")));
     }
 }
@@ -182,7 +266,11 @@ impl Services {
                     ..Default::default()
                 });
             })?;
-        let status = StatusMenu::new(events.clone(), mtm)?;
+        let status = StatusMenu::new(
+            events.clone(),
+            preferences.dictation_language.as_deref(),
+            mtm,
+        )?;
         let hotkeys = GlobalHotKeyManager::new()?;
         let hotkey_events = events.clone();
         GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
@@ -319,6 +407,8 @@ impl Services {
                 self.pending_microphone = true;
             }
             Command::Stop { id } if id == self.active_id => {
+                let language =
+                    languages::selection(self.preferences.dictation_language.as_deref())?;
                 self.interruptions.take();
                 let (samples, rate) = self
                     .capture
@@ -330,6 +420,7 @@ impl Services {
                     id,
                     samples,
                     rate,
+                    language,
                     self.control.clone().context("Missing session control")?,
                 ))?;
             }
@@ -546,6 +637,23 @@ impl Services {
     }
     fn event(&mut self, event: &Event, _mtm: MainThreadMarker) -> bool {
         match event.kind.as_str() {
+            kind if kind.starts_with("language:") => {
+                let code = kind
+                    .strip_prefix("language:")
+                    .filter(|code| *code != "auto");
+                if !self.shutting_down
+                    && self.capture.is_none()
+                    && !self.pending_microphone
+                    && !self.worker_busy
+                    && languages::selection(code).is_ok()
+                {
+                    self.preferences.dictation_language = code.map(str::to_owned);
+                    self.save();
+                }
+                self.status
+                    .select_language(self.preferences.dictation_language.as_deref());
+                true
+            }
             "audio_level" => {
                 if event.id == self.active_id && self.capture.is_some() {
                     self.indicator.level(event.progress);

@@ -364,9 +364,6 @@ impl Render for Peep {
                                             ),
                                     ),
                             )
-                            .when(!self.session.message.is_empty(), |d| {
-                                d.child(div().text_xs().text_color(rgb(p.muted)).child(self.session.message.clone()))
-                            })
                             .when(busy, |d| {
                                 d.child(
                                     div()

@@ -59,6 +59,10 @@ pub enum Command {
     Copy {
         text: String,
     },
+    Notify {
+        text: String,
+        recover_text: Option<String>,
+    },
     Settings {
         key: String,
         value: bool,
@@ -100,6 +104,7 @@ pub struct Session {
     pub phase: Phase,
     pub transcript: String,
     pub message: String,
+    pub paste_unconfirmed: bool,
     pub progress: f64,
     id: u64,
     model_ready: bool,
@@ -123,6 +128,7 @@ impl Session {
         }
         self.id += 1;
         self.transcript.clear();
+        self.paste_unconfirmed = false;
         self.message.clear();
         self.phase = Phase::RequestingMicrophone;
         vec![Command::Start { id: self.id }]
@@ -215,6 +221,12 @@ impl Session {
                 self.finish();
                 return vec![Command::Discard { id: self.id }];
             }
+            ("paste_sent", Phase::Delivering) => {
+                self.message = event.text.clone();
+                self.paste_unconfirmed = true;
+                self.finish();
+                return vec![Command::Discard { id: self.id }];
+            }
             ("error", phase) if phase != Phase::Canceling && self.busy() => {
                 self.message = event.text.clone();
                 if phase == Phase::Delivering {
@@ -257,6 +269,32 @@ mod tests {
             model_ready: true,
             ..Default::default()
         }
+    }
+    #[test]
+    fn unconfirmed_paste_keeps_copy_available_without_blocking_the_next_recording() {
+        let mut session = ready();
+        session.start();
+        session.event(&event("recording", 1, ""));
+        session.stop();
+        session.event(&event("transcript", 1, "testing testing"));
+        assert_eq!(session.phase, Phase::Delivering);
+        assert_eq!(
+            session.event(&event("paste_sent", 1, "Paste sent.")),
+            vec![Command::Discard { id: 1 }]
+        );
+        assert_eq!(session.phase, Phase::Ready);
+        assert!(session.paste_unconfirmed);
+        assert_eq!(session.transcript, "testing testing");
+        assert!(matches!(
+            session.presentation(),
+            Command::Presentation { can_copy: true, .. }
+        ));
+        assert_eq!(session.toggle(), vec![Command::Start { id: 2 }]);
+        assert!(!session.paste_unconfirmed);
+        assert!(session.transcript.is_empty());
+        session.event(&event("paste_sent", 1, "stale"));
+        assert!(!session.paste_unconfirmed);
+        assert!(session.message.is_empty());
     }
     #[test]
     fn model_selection_can_replace_a_ready_model_and_preserve_it_on_failure() {

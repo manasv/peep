@@ -11,6 +11,7 @@ pub struct Tray {
     finish: MenuItem,
     cancel: MenuItem,
     copy: MenuItem,
+    discard: MenuItem,
     idle_icon: Icon,
     recording_icon: Icon,
 }
@@ -34,6 +35,7 @@ impl Tray {
         let finish = MenuItem::with_id("stop", "Finish Dictation", false, None);
         let cancel = MenuItem::with_id("cancel", "Cancel Dictation", false, None);
         let copy = MenuItem::with_id("copy", "Copy Transcript", false, None);
+        let discard = MenuItem::with_id("discard", "Discard Transcript", false, None);
         let open = MenuItem::with_id("open", "Open Peep", true, None);
         let quit = MenuItem::with_id("quit", "Quit Peep", true, None);
         let menu = Menu::with_items(&[
@@ -42,6 +44,7 @@ impl Tray {
             &finish,
             &cancel,
             &copy,
+            &discard,
             &PredefinedMenuItem::separator(),
             &open,
             &quit,
@@ -63,6 +66,7 @@ impl Tray {
             finish,
             cancel,
             copy,
+            discard,
             idle_icon,
             recording_icon,
         })
@@ -78,6 +82,7 @@ impl Tray {
                 | Phase::Transcribing
         ));
         self.copy.set_enabled(can_copy);
+        self.discard.set_enabled(can_copy);
         let _ = self.tray.set_icon(Some(if phase == Phase::Recording {
             self.recording_icon.clone()
         } else {

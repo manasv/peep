@@ -1,6 +1,6 @@
 use accessibility::{AXAttribute, AXUIElement};
 use accessibility_sys::*;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use core_foundation::{
     base::{CFRange, CFType, TCFType},
     boolean::CFBoolean,
@@ -37,6 +37,53 @@ fn focused(system: &AXUIElement) -> Result<AXUIElement> {
     attr(system, kAXFocusedUIElementAttribute)?
         .downcast::<AXUIElement>()
         .ok_or_else(|| anyhow!("No focused editor."))
+}
+fn prepare_application(application: &AXUIElement) -> Result<bool> {
+    match application.set_attribute(
+        &AXAttribute::new(&CFString::new("AXManualAccessibility")),
+        CFBoolean::true_value().as_CFType(),
+    ) {
+        Ok(()) => Ok(true),
+        Err(accessibility::Error::Ax(code))
+            if [kAXErrorAttributeUnsupported, kAXErrorNotImplemented].contains(&code) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error).context("Could not enable the editor's accessibility support."),
+    }
+}
+fn focused_editor(
+    system: &AXUIElement,
+    application: &AXUIElement,
+    expected_pid: i32,
+    initializing: bool,
+) -> Result<AXUIElement> {
+    let deadline = Instant::now() + Duration::from_millis(750);
+    loop {
+        if frontmost().map(|app| app.0) != Some(expected_pid) {
+            bail!("The original app is no longer focused.");
+        }
+        let result = focused(system).and_then(|element| {
+            if focused(application)? != element {
+                bail!("The destination is ambiguous.");
+            }
+            Ok(element)
+        });
+        if initializing
+            && Instant::now() < deadline
+            && result.as_ref().is_err_and(|error| {
+                matches!(
+                    error.downcast_ref::<accessibility::Error>(),
+                    Some(accessibility::Error::Ax(code))
+                        if [kAXErrorNoValue, kAXErrorCannotComplete].contains(code)
+                )
+            })
+        {
+            std::thread::sleep(Duration::from_millis(30));
+            continue;
+        }
+        return result.context("The editor does not expose its focused text field.");
+    }
 }
 fn string(value: CFType) -> Result<String> {
     value
@@ -127,6 +174,10 @@ pub struct Target {
     paste: bool,
     original_value: Option<String>,
 }
+pub enum DeliveryOutcome {
+    Verified(String),
+    Unconfirmed(String),
+}
 impl Target {
     pub fn capture(expected_pid: i32) -> Result<Self> {
         if !trusted() {
@@ -152,12 +203,9 @@ impl Target {
         system.set_messaging_timeout(0.25)?;
         let application = AXUIElement::application(pid);
         application.set_messaging_timeout(0.25)?;
-        let element = focused(&system)?;
+        let initializing = prepare_application(&application)?;
+        let element = focused_editor(&system, &application, pid, initializing)?;
         element.set_messaging_timeout(0.25)?;
-        let host_element = focused(&application)?;
-        if host_element != element {
-            bail!("The destination is ambiguous.");
-        }
         editable(&element)?;
         let selection = selection(&element)?;
         let original_value =
@@ -204,7 +252,7 @@ impl Target {
         self,
         text: &str,
         cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<String> {
+    ) -> Result<DeliveryOutcome> {
         if text.trim().is_empty() {
             bail!("No text to insert.");
         }
@@ -220,13 +268,16 @@ impl Target {
             &AXAttribute::new(&CFString::new(kAXSelectedTextAttribute)),
             value,
         )?;
-        Ok(format!("Inserted into {}.", self.name))
+        Ok(DeliveryOutcome::Verified(format!(
+            "Inserted into {}.",
+            self.name
+        )))
     }
     fn paste_text(
         &self,
         text: &str,
         cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<String> {
+    ) -> Result<DeliveryOutcome> {
         let source = CGEventSource::new(CGEventSourceStateID::Private)
             .map_err(|_| anyhow!("Could not create the paste event."))?;
         let down = CGEvent::new_keyboard_event(source.clone(), 9, true)
@@ -251,23 +302,28 @@ impl Target {
             .as_ref()
             .and_then(|value| replace_selection(value, self.selection, text));
         let deadline = Instant::now() + Duration::from_secs(2);
-        while Instant::now() < deadline && clipboard.owns_clipboard() {
+        while Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(40));
             if let Some(expected) = &expected
-                && optional_attr(&self.element, kAXValueAttribute)?
+                && optional_attr(&self.element, kAXValueAttribute)
+                    .ok()
+                    .flatten()
                     .and_then(|value| string(value).ok())
                     .as_ref()
                     == Some(expected)
             {
                 drop(clipboard);
-                return Ok(format!("Pasted into {}.", self.name));
+                return Ok(DeliveryOutcome::Verified(format!(
+                    "Pasted into {}.",
+                    self.name
+                )));
             }
         }
         drop(clipboard);
-        bail!(
-            "Paste was sent to {}, but the editor did not confirm the text.",
+        Ok(DeliveryOutcome::Unconfirmed(format!(
+            "Paste sent to {}. Copy is available from Peep’s menu if needed.",
             self.name
-        )
+        )))
     }
 }
 
@@ -276,6 +332,7 @@ fn prefers_paste(bundle: &str) -> bool {
         bundle,
         "com.openai.codex"
             | "com.openai.chat"
+            | "com.t3tools.t3code"
             | "com.apple.Safari"
             | "app.zen-browser.zen"
             | "org.mozilla.firefox"
@@ -342,7 +399,8 @@ pub fn spawn(
                             _ => Err(anyhow!("The original editor is unavailable.")),
                         };
                         let (kind, text) = match result {
-                            Ok(text) => ("delivered", text),
+                            Ok(DeliveryOutcome::Verified(text)) => ("delivered", text),
+                            Ok(DeliveryOutcome::Unconfirmed(text)) => ("paste_sent", text),
                             Err(error) => ("error", error.to_string()),
                         };
                         let _ = events.try_send(peep_core::Event {
@@ -374,6 +432,7 @@ mod tests {
     fn chat_and_browser_editors_use_paste() {
         assert!(prefers_paste("com.openai.codex"));
         assert!(prefers_paste("com.openai.chat"));
+        assert!(prefers_paste("com.t3tools.t3code"));
         assert!(prefers_paste("com.google.Chrome.canary"));
         assert!(!prefers_paste("com.apple.TextEdit"));
     }

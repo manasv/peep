@@ -1,8 +1,8 @@
 use anyhow::{Result, anyhow, bail};
 use peep_core::Event;
 use scriptrs::{
-    LongFormTranscriptionPipeline, ParakeetDeployment, TranscriptionControl, TranscriptionDeadline,
-    WindowLimit,
+    LanguageSelection, LongFormTranscriptionPipeline, ParakeetDeployment, TranscriptionControl,
+    TranscriptionDeadline, WindowLimit,
 };
 use std::{path::PathBuf, sync::mpsc, time::Duration};
 use tokio_util::sync::CancellationToken;
@@ -30,7 +30,7 @@ impl Control {
 pub enum Job {
     Prepare(u64, PathBuf, Control),
     Download(u64, Control),
-    Transcribe(u64, Vec<f32>, u32, Control),
+    Transcribe(u64, Vec<f32>, u32, LanguageSelection, Control),
     Shutdown,
 }
 pub fn spawn(
@@ -79,7 +79,7 @@ pub fn spawn(
                             });
                         (id, control, result)
                     }
-                    Job::Transcribe(id, samples, rate, control) => {
+                    Job::Transcribe(id, samples, rate, language, control) => {
                         let result = (|| -> Result<Event> {
                             let audio = peep_runtime::audio::resample(&samples, rate)?;
                             if audio.len() < 4800 {
@@ -93,10 +93,12 @@ pub fn spawn(
                             let model = pipeline
                                 .as_ref()
                                 .ok_or_else(|| anyhow!("The speech model is not prepared."))?;
+                            let mut config = model.config().clone();
+                            config.transcription.language = language;
                             let result = model
                                 .run_with_preprocessor(
                                     &audio,
-                                    model.config(),
+                                    &config,
                                     &control.inference,
                                     &UnchangedAudio,
                                 )
@@ -188,12 +190,24 @@ mod tests {
                 2,
                 samples,
                 spec.sample_rate,
+                crate::languages::selection(std::env::var("PEEP_TEST_LANGUAGE").ok().as_deref())
+                    .unwrap(),
                 Control::new(),
             ))
             .unwrap();
         let text = rx.recv_blocking().unwrap();
         assert_eq!(text.kind, "transcript", "{}", text.text);
         assert!(!text.text.is_empty());
+        if let Ok(expected) = std::env::var("PEEP_TEST_EXPECTED_TEXT") {
+            let words = |value: &str| {
+                value
+                    .split(|c: char| !c.is_alphanumeric())
+                    .filter(|word| !word.is_empty())
+                    .map(str::to_lowercase)
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(words(&text.text), words(&expected));
+        }
         worker.send(Job::Shutdown).unwrap();
         cleanup.recv_blocking().unwrap();
     }

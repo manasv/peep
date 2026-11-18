@@ -23,6 +23,23 @@ use windows::{
 };
 
 struct Apartment;
+pub fn show_toast_window(handle: isize, x: f32, y: f32, width: f32, height: f32) -> Result<()> {
+    let hwnd = HWND(handle as *mut _);
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE.0 as isize);
+        SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            x as i32,
+            y as i32,
+            width as i32,
+            height as i32,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )?;
+    }
+    Ok(())
+}
 impl Drop for Apartment {
     fn drop(&mut self) {
         unsafe {

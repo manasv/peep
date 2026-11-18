@@ -3,7 +3,19 @@
 use gpui::{prelude::*, *};
 use peep_core::{Command, Event, Phase, Session};
 mod platform;
+mod toast;
 use platform::send;
+
+#[cfg(target_os = "macos")]
+fn hide_main_window(window: &mut Window, cx: &mut App) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if let Ok(handle) = HasWindowHandle::window_handle(window)
+        && let RawWindowHandle::AppKit(handle) = handle.as_raw()
+    {
+        unsafe { peep_macos::hide_settings_window(handle.ns_view) };
+    }
+    cx.hide();
+}
 
 actions!(
     peep,
@@ -48,7 +60,8 @@ struct Peep {
     quitting: bool,
     recording_shortcut: bool,
     shortcut_problem: String,
-    alert_open: bool,
+    #[cfg(not(target_os = "linux"))]
+    toast: Option<AnyWindowHandle>,
 }
 impl Peep {
     fn new(
@@ -88,7 +101,8 @@ impl Peep {
                 }
             });
             if platform::MACOS {
-                cx.hide();
+                #[cfg(target_os = "macos")]
+                window.defer(cx, hide_main_window);
             }
             false
         });
@@ -124,10 +138,17 @@ impl Peep {
             quitting: false,
             recording_shortcut: false,
             shortcut_problem: String::new(),
-            alert_open: false,
+            #[cfg(not(target_os = "linux"))]
+            toast: None,
         }
     }
     fn effects(&mut self, effects: Vec<Command>, cx: &mut Context<Self>) {
+        #[cfg(not(target_os = "linux"))]
+        if self.session.phase == Phase::RequestingMicrophone
+            && let Some(previous) = self.toast.take()
+        {
+            let _ = cx.update_window(previous, |_, window, _| window.remove_window());
+        }
         for effect in effects {
             send(effect);
         }
@@ -151,49 +172,24 @@ impl Peep {
             send(Command::Shutdown);
         }
     }
-    fn critical_alert(
-        &mut self,
-        title: &str,
-        detail: &str,
-        recover_text: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if self.alert_open || self.quitting {
+    fn notify(&mut self, message: &str, recover_text: bool, cx: &mut Context<Self>) {
+        if self.quitting {
             return;
         }
-        self.show(cx);
-        let buttons = if recover_text {
-            vec![
-                PromptButton::ok("Copy text"),
-                PromptButton::cancel("Keep for later"),
-                PromptButton::new("Discard"),
-            ]
-        } else {
-            vec![PromptButton::ok("OK")]
-        };
-        let Ok(answer) = cx.update_window(self.window, |_, window, cx| {
-            window.prompt(PromptLevel::Critical, title, Some(detail), &buttons, cx)
-        }) else {
+        toast::show(self, message, recover_text, cx);
+    }
+    fn toast_action(&mut self, action: &str, expected: &str, cx: &mut Context<Self>) {
+        if self.session.busy() || self.session.transcript != expected {
             return;
-        };
-        self.alert_open = true;
-        cx.spawn(async move |this, cx| {
-            let answer = answer.await.ok();
-            let _ = this.update(cx, |this, cx| {
-                this.alert_open = false;
-                if recover_text {
-                    match answer {
-                        Some(0) => send(Command::Copy {
-                            text: this.session.transcript.clone(),
-                        }),
-                        Some(2) => this.session.transcript.clear(),
-                        _ => {}
-                    }
-                }
-                this.effects(vec![], cx);
-            });
-        })
-        .detach();
+        }
+        match action {
+            "copy" => send(Command::Copy {
+                text: expected.to_owned(),
+            }),
+            "discard" => self.session.transcript.clear(),
+            _ => return,
+        }
+        self.effects(vec![], cx);
     }
 
     fn event(&mut self, event: Event, cx: &mut Context<Self>) {
@@ -224,11 +220,13 @@ impl Peep {
                 cx.notify();
             }
             "notice" => {
-                self.session.message = event.text;
-                cx.notify();
+                self.notify(&event.text, false, cx);
             }
             "critical_problem" => {
-                self.critical_alert("Peep needs your attention", &event.text, false, cx);
+                self.notify(&event.text, !self.session.transcript.is_empty(), cx);
+            }
+            "toast_copy" | "toast_discard" => {
+                self.toast_action(event.kind.strip_prefix("toast_").unwrap(), &event.text, cx);
             }
             "copy_requested" if event.text == self.session.transcript && !self.session.busy() => {
                 cx.write_to_clipboard(ClipboardItem::new_string(event.text.clone()));
@@ -242,6 +240,7 @@ impl Peep {
                     self.session.message = "Copied. Paste into your app with Ctrl–V.".into();
                 } else {
                     self.session.message = "Could not copy your text. Try Copy text again.".into();
+                    self.notify("Could not copy your text. Try Copy text again.", true, cx);
                 }
                 self.effects(vec![], cx);
             }
@@ -255,20 +254,23 @@ impl Peep {
                 self.effects(vec![], cx);
             }
             "toggle_dictation" if !self.quitting => {
-                if self.alert_open {
-                    return;
-                }
-                if !self.session.busy() && !self.session.transcript.is_empty() {
-                    self.critical_alert(
-                        "Your text hasn’t been inserted",
-                        "Copy your dictated text before starting another recording.",
+                if !self.session.busy()
+                    && !self.session.transcript.is_empty()
+                    && !self.session.paste_unconfirmed
+                {
+                    self.notify(
+                        "Your previous text is ready. Copy or discard it to start another recording.",
                         true,
                         cx,
                     );
                     return;
                 }
                 if self.session.phase == Phase::NeedsModel {
-                    self.show(cx);
+                    self.notify(
+                        "Open Peep’s settings to download a speech model first.",
+                        false,
+                        cx,
+                    );
                     return;
                 }
                 let effects = self.session.toggle();
@@ -285,6 +287,10 @@ impl Peep {
             "copy" => send(Command::Copy {
                 text: self.session.transcript.clone(),
             }),
+            "discard" if !self.session.busy() => {
+                self.session.transcript.clear();
+                self.effects(vec![], cx);
+            }
             "open" => self.show(cx),
             "open_settings" => {
                 self.show(cx);
@@ -295,16 +301,11 @@ impl Peep {
             _ if !self.quitting => {
                 let before = self.session.phase;
                 let effects = self.session.event(&event);
-                if let Some(title) = critical_failure(before, self.session.phase, &event) {
-                    let detail = if before == Phase::Delivering {
-                        "Your dictated text is safe. Copy it to finish manually, or keep it for later."
-                    } else {
-                        "Offline dictation couldn’t be prepared. Please retry setup or reopen Peep."
-                    };
-                    self.critical_alert(title, detail, before == Phase::Delivering, cx);
-                }
-                if event.kind == "copy_ready" {
-                    self.show(cx);
+                if should_notify(before, self.session.phase, &event)
+                    && !self.session.message.is_empty()
+                {
+                    let message = self.session.message.clone();
+                    self.notify(&message, !self.session.transcript.is_empty(), cx);
                 }
                 self.effects(effects, cx);
             }
@@ -373,6 +374,8 @@ impl Peep {
 mod views;
 
 fn main() {
+    #[cfg(target_os = "macos")]
+    peep_macos::configure_application();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     #[cfg(target_os = "linux")]
     match platform::handle_cli() {
@@ -394,7 +397,9 @@ fn main() {
     root.on_reopen(|cx| {
         cx.activate(true);
         for handle in cx.windows() {
-            let _ = cx.update_window(handle, |_, window, _| window.activate_window());
+            if let Some(handle) = handle.downcast::<Peep>() {
+                let _ = handle.update(cx, |_, window, _| window.activate_window());
+            }
         }
     });
     root.run(move |cx: &mut App| {
@@ -449,6 +454,27 @@ fn main() {
             });
         });
         cx.activate(true);
+        #[cfg(debug_assertions)]
+        if std::env::var_os("PEEP_TEST_TOAST").is_some() {
+            cx.spawn(async move |cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(2))
+                    .await;
+                #[cfg(target_os = "macos")]
+                let _ = window.update(cx, |_, window, cx| hide_main_window(window, cx));
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(2))
+                    .await;
+                let _ = window.update(cx, |this, _, cx| {
+                    this.notify(
+                        "Paste sent. Copy is available from Peep’s menu if needed.",
+                        false,
+                        cx,
+                    )
+                });
+            })
+            .detach();
+        }
     });
 }
 
@@ -486,43 +512,39 @@ fn shortcut_chord(stroke: &Keystroke) -> Option<String> {
     Some(parts.join("+"))
 }
 
-fn critical_failure(before: Phase, after: Phase, event: &Event) -> Option<&'static str> {
-    if event.kind != "error" || before == after {
-        return None;
-    }
-    match before {
-        Phase::Downloading | Phase::Preparing => Some("Peep couldn’t get ready"),
-        Phase::Delivering => Some("Your text couldn’t be inserted"),
-        _ => None,
-    }
+fn should_notify(before: Phase, after: Phase, event: &Event) -> bool {
+    before != after
+        && matches!(
+            event.kind.as_str(),
+            "error" | "paste_sent" | "copy_ready" | "transcript"
+        )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::critical_failure;
+    use super::should_notify;
     use peep_core::{Event, Phase};
     #[test]
-    fn only_blocking_or_text_recovery_failures_raise_alerts() {
+    fn notifications_cover_failures_and_uncertain_paste_without_stale_events() {
         let error = Event {
             kind: "error".into(),
             ..Default::default()
         };
-        assert!(critical_failure(Phase::Delivering, Phase::Ready, &error).is_some());
-        assert!(critical_failure(Phase::Downloading, Phase::NeedsModel, &error).is_some());
-        assert!(critical_failure(Phase::Preparing, Phase::NeedsModel, &error).is_some());
-        assert!(critical_failure(Phase::Delivering, Phase::Delivering, &error).is_none());
-        assert!(critical_failure(Phase::RequestingMicrophone, Phase::Ready, &error).is_none());
-        assert!(critical_failure(Phase::Recording, Phase::Ready, &error).is_none());
-        assert!(
-            critical_failure(
-                Phase::Transcribing,
-                Phase::Ready,
-                &Event {
-                    kind: "transcript".into(),
-                    ..Default::default()
-                }
-            )
-            .is_none()
-        );
+        for before in [
+            Phase::Delivering,
+            Phase::Downloading,
+            Phase::Preparing,
+            Phase::RequestingMicrophone,
+            Phase::Recording,
+        ] {
+            assert!(should_notify(before, Phase::Ready, &error));
+        }
+        assert!(!should_notify(Phase::Delivering, Phase::Delivering, &error));
+        let sent = Event {
+            kind: "paste_sent".into(),
+            ..Default::default()
+        };
+        assert!(should_notify(Phase::Delivering, Phase::Ready, &sent));
+        assert!(!should_notify(Phase::Ready, Phase::Ready, &sent));
     }
 }

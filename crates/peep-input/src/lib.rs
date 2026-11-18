@@ -14,6 +14,8 @@ pub mod control;
 #[cfg(all(unix, any(target_os = "linux", feature = "linux-integration")))]
 pub mod linux;
 #[cfg(all(unix, any(target_os = "linux", feature = "linux-integration")))]
+pub mod notifications;
+#[cfg(all(unix, any(target_os = "linux", feature = "linux-integration")))]
 pub mod portal;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -21,6 +23,8 @@ mod windows;
 pub use linux::Context as NativeContext;
 #[cfg(target_os = "windows")]
 pub use windows::Context as NativeContext;
+#[cfg(target_os = "windows")]
+pub use windows::show_toast_window;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snapshot {
